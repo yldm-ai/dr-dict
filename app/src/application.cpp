@@ -342,7 +342,7 @@ int Application::run(HINSTANCE instance)
     auto settings = library_.settings();
     auto shell = shell_override_.empty() ? settings.value("shell", std::string("mica")) : shell_override_;
     if (!window_.create(instance, shell == "direct2d" ? ShellStyle::Direct2D : ShellStyle::Mica, IDI_DR_DICT,
-                        settings["window"].value("widthRatio", 0.62), settings["window"].value("heightRatio", 0.78)))
+                        settings["window"].value("widthRatio", 0.4), settings["window"].value("heightRatio", 0.5)))
         return 1;
     window_.set_title(L"DR Dict");
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };

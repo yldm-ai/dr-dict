@@ -243,7 +243,8 @@ Json Library::default_settings()
             {"shell", "mica"},
             {"invertArticles", true},
             {"articleWidth", "comfortable"},
-            {"window", {{"widthRatio", 0.62}, {"heightRatio", 0.78}}}};
+            // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
+            {"window", {{"widthRatio", 0.4}, {"heightRatio", 0.5}}}};
 }
 Json Library::settings()
 {
@@ -255,8 +256,9 @@ Json Library::settings()
         if (fs::exists(path))
         {
             auto saved = Json::parse(read_file(path));
+            // The window size is not user-configurable; older files must not pin a stale size.
             for (auto &[key, value] : saved.items())
-                if (result.contains(key) && result[key].type() == value.type())
+                if (key != "window" && result.contains(key) && result[key].type() == value.type())
                     result[key] = value;
         }
     }
