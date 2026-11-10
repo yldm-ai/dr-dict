@@ -35,13 +35,21 @@ export function publish(topic: Topic): void {
   for (const handler of subscribers.get(topic) ?? []) handler();
 }
 
-const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+// The WebView is pinned to prefers-color-scheme: light so dictionaries never apply their own dark
+// styles under our inversion; the Windows theme comes from the native side instead.
+let systemDark = false;
+const systemThemeHandlers = new Set<() => void>();
+export function setSystemDark(dark: boolean): void {
+  if (dark === systemDark) return;
+  systemDark = dark;
+  for (const handler of systemThemeHandlers) handler();
+}
 export function effectiveTheme(): 'light' | 'dark' {
-  if (state.settings.theme === 'system') return systemDark.matches ? 'dark' : 'light';
+  if (state.settings.theme === 'system') return systemDark ? 'dark' : 'light';
   return state.settings.theme;
 }
 export function onSystemThemeChange(handler: () => void): void {
-  systemDark.addEventListener('change', handler);
+  systemThemeHandlers.add(handler);
 }
 
 export const formatNames: Record<string, string> = { mdict: 'MDict', stardict: 'StarDict' };

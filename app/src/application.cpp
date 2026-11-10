@@ -242,7 +242,10 @@ void Application::receive(const Json &request)
                           {"settings", library_.settings()},
                           {"defaults", Library::default_settings()},
                           {"history", library_.history()},
-                          {"dataPath", utf8(library_.root())}};
+                          {"dataPath", utf8(library_.root())},
+                          // The page always sees prefers-color-scheme: light (see WebView::configure),
+                          // so "follow system" takes the Windows theme from here.
+                          {"systemDark", Window::system_dark()}};
                 if (!initial_files_.empty())
                 {
                     auto files = std::move(initial_files_);
@@ -360,6 +363,7 @@ int Application::run(HINSTANCE instance)
         });
     };
     webview_.on_toggle_borderless = window_.on_toggle_borderless;
+    window_.on_system_theme = [this](bool dark) { webview_.send({{"event", "system-theme"}, {"dark", dark}}); };
     window_.on_caption_tooltip = [this](const std::wstring &text, RECT button) {
         const double scale = 96.0 / GetDpiForWindow(window_.handle());
         webview_.send({{"event", "caption-tooltip"},

@@ -123,6 +123,14 @@ void WebView::configure(const fs::path &web_root)
         fail(h, L"界面资源映射");
         return;
     }
+    // Dark articles come only from frame.css inverting a light page. Many dictionaries (e.g. OALDPE)
+    // carry their own prefers-color-scheme: dark styles, which the inversion would turn back into
+    // dark-on-light with muddy text, so every page sees a light preference. The app's own theme is
+    // set by body[data-theme] and reads the Windows theme from the native side.
+    ComPtr<ICoreWebView2_13> v13;
+    ComPtr<ICoreWebView2Profile> profile;
+    if (SUCCEEDED(view_.As(&v13)) && SUCCEEDED(v13->get_Profile(&profile)))
+        profile->put_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
     ComPtr<ICoreWebView2Settings> settings;
     view_->get_Settings(&settings);
     settings->put_IsStatusBarEnabled(FALSE);

@@ -4,7 +4,7 @@ import { brandMark, hydrateIcons } from './icons.ts';
 import { addDictionaries, initLibrary, resetLibrary } from './library-panel.ts';
 import { initSettings, openSettings } from './settings-dialog.ts';
 import { Tooltips } from './tooltip.ts';
-import { effectiveTheme, onSystemThemeChange, state, subscribe } from './state.ts';
+import { effectiveTheme, onSystemThemeChange, setSystemDark, state, subscribe } from './state.ts';
 
 // Self-drawn hover tips everywhere, as in DR Reader (native title tooltips never appear).
 const tooltips = new Tooltips();
@@ -238,6 +238,7 @@ async function bootstrap(): Promise<void> {
     applyTheme();
     refresh();
   });
+  on('system-theme', ({ dark }) => setSystemDark(Boolean(dark)));
   on('caption-tooltip', ({ text, left, width }) => {
     // A Direct2D caption button's tip: the button ends at the top edge of the web content.
     if (text) tooltips.show({ left, width, top: -1, height: 1 }, text);
@@ -250,6 +251,7 @@ async function bootstrap(): Promise<void> {
     state.settings = { ...state.settings, ...data.settings };
     state.history = data.history;
     state.dataPath = data.dataPath;
+    setSystemDark(Boolean(data.systemDark));
   } catch (error) {
     toast((error as Error).message, 'error');
   }

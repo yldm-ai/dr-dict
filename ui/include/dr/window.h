@@ -28,6 +28,10 @@ class Window
     RECT content_bounds() const;
     void set_style(ShellStyle style);
     void set_theme(const std::string &theme);
+    /** Whether Windows apps use the dark theme (thread-safe registry read). */
+    static bool system_dark();
+    // Called on the UI thread when the Windows app theme switches between light and dark.
+    std::function<void(bool dark)> on_system_theme;
     /** The theme's window background (0xRRGGBB), equal to the page's --bg. */
     UINT32 background() const { return caption_background_; }
     /** "light" or "dark", with "system" resolved from the Windows app theme. */
@@ -60,6 +64,7 @@ class Window
     double width_ratio_ = 0.6;
     double height_ratio_ = 0.75;
     bool follow_system_theme_ = false;
+    bool system_dark_ = false;
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
     LRESULT message(UINT, WPARAM, LPARAM);
     void paint();

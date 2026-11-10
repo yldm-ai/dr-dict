@@ -1,6 +1,7 @@
 import { $, call, escape, formatNumber, toast } from './bridge.ts';
 import { brandMark, hydrateIcons } from './icons.ts';
 import { avatar, effectiveTheme, publish, state } from './state.ts';
+import { speak, stopSpeaking } from './speech.ts';
 
 type Hit = { id: string; name: string; count: number };
 type LookupResult = {
@@ -247,6 +248,13 @@ export function initArticles(handlers: { focusSearch: (text?: string, append?: s
           handlers.focusSearch(data.word.trim());
           void lookup(data.word);
         }
+        break;
+      case 'speak':
+        if (typeof data.text === 'string' && !speak(data.text, typeof data.lang === 'string' ? data.lang : 'en-US'))
+          toast('没有可用的本机朗读语音', 'error');
+        break;
+      case 'speak-stop':
+        stopSpeaking();
         break;
       case 'open':
         if (typeof data.url === 'string') call('open.external', { url: data.url }).catch((e) => toast(e.message, 'error'));

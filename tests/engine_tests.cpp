@@ -163,7 +163,9 @@ int main()
                  {"Banana", "<i>banana</i> 香蕉"},
                  {"pomme", "@@@LINK=apple"}},
                 false, true, "Title=\"Demo &amp; Test\" Description=\"&lt;p&gt;About&lt;/p&gt;\" StyleSheet=\"1\n<em>\n</em>\n\"");
-    write_mdict(dicts / "demo.mdd", {{"\\demo.css", "b{color:red}"}, {"\\img\\A.png", "PNG"}}, true, false);
+    // OALDPE names example audio like "_take#_gbs_1.mp3" (linked as sound://_take#_gbs_1.mp3).
+    write_mdict(dicts / "demo.mdd",
+                {{"\\demo.css", "b{color:red}"}, {"\\img\\A.png", "PNG"}, {"\\_take#_gbs_1.mp3", "MP3"}}, true, false);
     {
         MdictDictionary d(dicts / "demo.mdx");
         CHECK(d.title() == "Demo & Test");
@@ -173,7 +175,7 @@ int main()
         sink.word = [&](std::string_view w, uint64_t a, uint64_t b) { words.emplace_back(std::string(w), a, b); };
         sink.resource = [&](std::string_view p, int, uint64_t, uint64_t) { words.emplace_back("res:" + std::string(p), 0, 0); };
         d.index(sink);
-        CHECK(words.size() == 5);
+        CHECK(words.size() == 6);
         CHECK(std::get<0>(words[0]) == "apple");
         CHECK(d.article(std::get<1>(words[0]), std::get<2>(words[0])).find("<em>fruit</em>") != std::string::npos);
         CHECK(d.article(std::get<1>(words[2]), std::get<2>(words[2])) == "@@@LINK=apple");
@@ -228,6 +230,11 @@ int main()
         auto img = library.resource(mdx_id, "IMG/a.png?x=1");
         CHECK(img && img->data == "PNG");
         CHECK(!library.resource(mdx_id, "../secret.txt"));
+        // frame.js percent-encodes sound:// names, so a '#' inside the name arrives as %23; a raw '#'
+        // is a URL fragment and must not reach the name.
+        auto voice = library.resource(mdx_id, "_take%23_gbs_1.mp3");
+        CHECK(voice && voice->data == "MP3" && voice->mime == "audio/mpeg");
+        CHECK(!library.resource(mdx_id, "_take#_gbs_1.mp3"));
         auto pic = library.resource(sd_id, "pic.png");
         CHECK(pic && pic->data == "IMG");
 

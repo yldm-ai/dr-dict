@@ -39,9 +39,25 @@
   document.addEventListener('load', schedule, true);
 
   let audio = null;
+  // A sound:// target is a resource *name*, and names may contain '#', '?' or spaces: OALDPE's
+  // example audio is "sound://_take#_gbs_1.mp3". Taken as a URL, '#' would start a fragment and
+  // the request would ask for "_take". GoldenDict-ng's ArticleView::playAudio likewise rejoins
+  // path + "#" + fragment; here every segment is percent-encoded (after undoing any encoding the
+  // dictionary already applied) and the native side decodes it back to the stored name.
+  const resourceUrl = (path) =>
+    new URL(
+      path
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .split('/')
+        .map((segment) => encodeURIComponent(decode(segment)))
+        .join('/'),
+      location.href,
+    ).href;
   const play = (path) => {
     if (audio) audio.pause();
-    audio = new Audio(new URL(path.replace(/\\/g, '/').replace(/^\/+/, ''), location.href).href);
+    post({ type: 'speak-stop' });
+    audio = new Audio(resourceUrl(path));
     audio.play().catch(() => {});
   };
   const scrollToAnchor = (name) => {
@@ -60,10 +76,38 @@
     }
   };
 
+  // A pronunciation icon without a sound:// target is a dictionary's own text-to-speech button.
+  // OALDPE marks examples that have no recording this way ("sound pron-uk tts") and sends them
+  // to Edge's online read-aloud service, which now rejects third-party clients. The app reads
+  // them instead: the frame extracts the sentence, the app picks the voice.
+  const speechButton = 'a.tts:not([href]), a.sound:not([href])';
+  const sentenceOf = (button) => {
+    const host = button.parentElement;
+    if (!host) return '';
+    const copy = host.cloneNode(true);
+    // Drop translations (OALDPE: <xt><chn>…</chn></xt>) and the icons themselves.
+    for (const node of copy.querySelectorAll('xt, chn, a.sound, a.tts, script, style')) node.remove();
+    return copy.textContent.replace(/\s+/g, ' ').trim();
+  };
+  const accentOf = (button) => {
+    const names = `${button.className} ${button.parentElement ? button.parentElement.className : ''}`;
+    return /\b(pron-)?(uk|gb|br)\b/i.test(names) ? 'en-GB' : 'en-US';
+  };
+
   document.addEventListener(
     'click',
     (event) => {
       if (event.button !== 0 || event.defaultPrevented) return;
+      const speech = event.target instanceof Element ? event.target.closest(speechButton) : null;
+      if (speech) {
+        const text = sentenceOf(speech);
+        if (!text) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (audio) audio.pause();
+        post({ type: 'speak', text, lang: accentOf(speech) });
+        return;
+      }
       const link = event.target instanceof Element ? event.target.closest('a[href], area[href]') : null;
       if (!link) return;
       const href = (link.getAttribute('href') || '').trim();

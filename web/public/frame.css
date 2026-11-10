@@ -30,15 +30,19 @@ html:not(.dr-embedded) body { padding: 0; }
 .xdxf-ex { color: #5f5e5a; font-style: italic; }
 .xdxf-co { color: #787774; }
 
-/* The dark article theme inverts the page and re-inverts media to keep photos natural. */
+/* The dark article theme inverts the page and re-inverts media to keep photos natural.
+   A plain invert(0.9) turns typical dictionary text (#333) into a dim #bdbdbd. Instead the page is
+   fully inverted, then contrast lifts black to the app background and brightness lifts text:
+   white -> #191919 (--bg) and #333 -> ~#e2e2e2, near Notion's dark text (white at 90%). */
 html[data-dr-theme='dark'] {
   background: #fff;
-  filter: invert(0.9) hue-rotate(180deg);
+  filter: invert(1) hue-rotate(180deg) contrast(0.835) brightness(1.18);
 }
+/* The inverse chain in reverse order, so media composite back to their own colours. */
 html[data-dr-theme='dark'] img,
 html[data-dr-theme='dark'] video,
 html[data-dr-theme='dark'] picture,
 html[data-dr-theme='dark'] canvas,
 html[data-dr-theme='dark'] [style*='background-image'] {
-  filter: invert(1) hue-rotate(180deg);
+  filter: brightness(0.847) contrast(1.198) hue-rotate(180deg) invert(1);
 }
