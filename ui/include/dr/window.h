@@ -71,7 +71,7 @@ class Window
     bool borderless_ = false;
     WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
     LONG_PTR windowed_style_ = 0;
-    UINT32 caption_background_ = 0xfbfbfa;
+    UINT32 caption_background_ = 0xffffff;
     UINT32 caption_text_ = 0x37352f;
     UINT32 caption_hover_ = 0xf1f1ef;
     int hot_ = HTNOWHERE, pressed_ = HTNOWHERE, tip_ = HTNOWHERE;

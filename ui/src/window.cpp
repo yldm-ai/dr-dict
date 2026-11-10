@@ -120,10 +120,10 @@ void Window::set_theme(const std::string &theme)
     if (follow_system_theme_)
         RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
                      L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size);
-    // Match the web application's --sidebar, --text and --hover in styles.css.
+    // Match the web application's --bg, --text and --hover in styles.css.
     const bool dark = theme == "dark" || (follow_system_theme_ && light == 0);
-    caption_background_ = dark ? 0x1b1b1a : 0xfbfbfa;
-    caption_text_ = dark ? 0xe6e6e4 : 0x37352f;
+    caption_background_ = dark ? 0x191919 : 0xffffff;
+    caption_text_ = dark ? 0xe3e2df : 0x37352f;
     caption_hover_ = dark ? 0x2a2a29 : 0xefefed;
     BOOL value = dark;
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
