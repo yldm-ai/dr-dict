@@ -6,8 +6,7 @@ const paths: Record<string, string> = {
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.8l2 2h7.2a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   book: '<path d="M5.5 5.5a2 2 0 0 1 2-2h10v14h-10a2 2 0 0 0-2 2z"/><path d="M5.5 19.5a2 2 0 0 0 2 2h10v-4"/>',
   library: '<path d="M5 4.5v15M9.5 4.5v15"/><path d="M13.6 5.4l3.7-1 3.9 14.4-3.7 1z"/>',
-  settings:
-    '<path d="M4 7.5h9M17.5 7.5H20M4 16.5h3M11.5 16.5H20"/><circle cx="15.25" cy="7.5" r="2.25"/><circle cx="9.25" cy="16.5" r="2.25"/>',
+  layout: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9h17M9 9v10.5"/>',
   'chevron-down': '<path d="M7 10l5 5 5-5"/>',
   'chevron-right': '<path d="M10 7l5 5-5 5"/>',
   'arrow-left': '<path d="M19 12H5.5M11 6l-6 6 6 6"/>',
@@ -24,6 +23,8 @@ const paths: Record<string, string> = {
 };
 
 export function icon(name: string): string {
+  // DR Reader keeps the Fluent gear (U+E713, also present in Segoe MDL2 Assets) for settings.
+  if (name === 'settings') return '<span class="icon fluent-icon" aria-hidden="true">&#xE713;</span>';
   const body = paths[name] ?? paths.info;
   return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }

@@ -17,7 +17,7 @@
       <aside class="sidebar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
-          <span class="brand-name">DR Dict</span>
+          <span class="brand-name">水杉词典</span>
         </div>
         <div class="search">
           <span class="search-icon" data-icon="search" aria-hidden="true"></span>
@@ -39,11 +39,8 @@
         <ul id="word-list" class="word-list" role="listbox" aria-labelledby="list-label"></ul>
         <div id="list-empty" class="list-empty" hidden></div>
         <div class="sidebar-footer">
-          <button id="open-library" class="side-button" type="button">
-            <span data-icon="library"></span><span>词典库</span><span id="library-count" class="count">0</span>
-          </button>
-          <button id="open-settings" class="side-button icon-only" type="button" aria-label="设置" title="设置">
-            <span data-icon="settings"></span>
+          <button id="open-settings" class="side-button" type="button">
+            <span data-icon="settings"></span><span>设置</span><span id="settings-badge" class="count" hidden></span>
           </button>
         </div>
       </aside>
@@ -67,88 +64,97 @@
       </main>
     </div>
 
-    <dialog id="library-dialog" class="dialog library-dialog" aria-labelledby="library-title">
-      <header class="dialog-header">
-        <div>
-          <h2 id="library-title">词典库</h2>
-          <p class="dialog-subtitle">词典文件保留在原位置，DR Dict 只为它们建立索引。</p>
-        </div>
-        <button class="icon-button" type="button" data-close aria-label="关闭"><span data-icon="x"></span></button>
-      </header>
-      <div class="dialog-toolbar">
-        <button id="add-files" class="button primary" type="button"><span data-icon="plus"></span>添加词典</button>
-        <button id="add-folder" class="button" type="button"><span data-icon="folder"></span>添加文件夹</button>
-        <span class="toolbar-note">支持 MDict（.mdx + .mdd）与 StarDict（.ifo）</span>
-      </div>
-      <div id="import-progress" class="import-progress" hidden>
-        <div class="import-text"><span id="import-name">正在准备…</span><span id="import-percent"></span></div>
-        <div class="bar"><span id="import-bar"></span></div>
-      </div>
-      <ul id="dict-list" class="dict-list"></ul>
-      <div id="dict-about" class="dict-about" hidden>
-        <button id="about-back" class="button ghost" type="button"><span data-icon="arrow-left"></span>返回词典库</button>
-        <div id="about-meta" class="about-meta"></div>
-        <iframe id="about-frame" class="about-frame" title="词典简介" sandbox="allow-same-origin"></iframe>
-      </div>
-    </dialog>
-
-    <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">
-      <header class="dialog-header">
+    <dialog id="settings-dialog" class="dialog prefs" aria-labelledby="settings-title">
+      <header class="dialog-header caption">
         <h2 id="settings-title">设置</h2>
-        <button class="icon-button" type="button" data-close aria-label="关闭"><span data-icon="x"></span></button>
+        <button class="caption-close" type="button" data-close title="关闭" aria-label="关闭">&#xE8BB;</button>
       </header>
-      <div class="settings">
-        <div class="settings-group">外观</div>
-        <div class="setting">
-          <div><div class="setting-name">主题</div></div>
-          <div class="segmented" data-setting="theme">
-            <button type="button" data-value="light">浅色</button>
-            <button type="button" data-value="dark">深色</button>
-            <button type="button" data-value="system">跟随系统</button>
-          </div>
-        </div>
-        <div class="setting">
-          <div>
-            <div class="setting-name">窗口标题栏</div>
-            <div class="setting-note">系统标题栏使用云母材质；自绘标题栏的高度随系统指标与 DPI 变化</div>
-          </div>
-          <div class="segmented" data-setting="shell">
-            <button type="button" data-value="mica">系统云母</button>
-            <button type="button" data-value="direct2d">Direct2D 自绘</button>
-          </div>
-        </div>
-        <div class="settings-group">词条</div>
-        <div class="setting">
-          <div><div class="setting-name">正文宽度</div></div>
-          <div class="segmented" data-setting="articleWidth">
-            <button type="button" data-value="narrow">窄</button>
-            <button type="button" data-value="comfortable">适中</button>
-            <button type="button" data-value="wide">宽</button>
-          </div>
-        </div>
-        <div class="setting">
-          <div>
-            <div class="setting-name">深色模式下反色显示词条</div>
-            <div class="setting-note">关闭后，词条在深色模式中保持原有的浅色纸面</div>
-          </div>
-          <label class="switch"><input id="invert-articles" type="checkbox" /><span></span></label>
-        </div>
-        <div class="settings-group">数据</div>
-        <div class="setting">
-          <div>
-            <div class="setting-name">查询历史</div>
-            <div class="setting-note">只保存在本机</div>
-          </div>
-          <button id="clear-history" class="button" type="button">清除历史</button>
-        </div>
-        <div class="setting stacked">
-          <div class="setting-name">数据位置</div>
-          <code id="data-path" class="data-path"></code>
-        </div>
+      <div class="tabs" role="tablist" aria-label="设置分类">
+        <button class="tab" type="button" role="tab" data-tab="library" aria-selected="true"><span data-icon="library"></span>词典库</button>
+        <button class="tab" type="button" role="tab" data-tab="interface" aria-selected="false"><span data-icon="layout"></span>界面</button>
+        <button class="tab" type="button" role="tab" data-tab="article" aria-selected="false"><span data-icon="book"></span>词条</button>
+        <button class="tab" type="button" role="tab" data-tab="data" aria-selected="false"><span data-icon="clock"></span>数据</button>
       </div>
+      <div class="tab-body">
+        <section class="tab-panel library-panel" role="tabpanel" data-panel="library">
+          <div class="library-toolbar">
+            <button id="add-files" class="button primary" type="button"><span data-icon="plus"></span>添加词典</button>
+            <button id="add-folder" class="button" type="button"><span data-icon="folder"></span>添加文件夹</button>
+            <span class="toolbar-note">支持 MDict（.mdx + .mdd）与 StarDict（.ifo），词典文件保留在原位置</span>
+          </div>
+          <div id="import-progress" class="import-progress" hidden>
+            <div class="import-text"><span id="import-name">正在准备…</span><span id="import-percent"></span></div>
+            <div class="bar"><span id="import-bar"></span></div>
+          </div>
+          <ul id="dict-list" class="dict-list"></ul>
+          <div id="dict-about" class="dict-about" hidden>
+            <button id="about-back" class="button ghost" type="button"><span data-icon="arrow-left"></span>返回词典库</button>
+            <div id="about-meta" class="about-meta"></div>
+            <iframe id="about-frame" class="about-frame" title="词典简介" sandbox="allow-same-origin"></iframe>
+          </div>
+        </section>
+
+        <section class="tab-panel" role="tabpanel" data-panel="interface" hidden>
+          <div class="groups">
+            <fieldset class="group">
+              <legend>主题</legend>
+              <label class="choice"><input type="radio" name="theme" value="light" /><span>浅色</span></label>
+              <label class="choice"><input type="radio" name="theme" value="dark" /><span>深色</span></label>
+              <label class="choice"><input type="radio" name="theme" value="system" /><span>跟随系统</span></label>
+            </fieldset>
+            <fieldset class="group">
+              <legend>窗口标题栏</legend>
+              <label class="choice"><input type="radio" name="shell" value="mica" /><span>系统云母</span></label>
+              <label class="choice"><input type="radio" name="shell" value="direct2d" /><span>Direct2D 自绘</span></label>
+              <p class="group-note">自绘标题栏的高度随系统指标与 DPI 变化</p>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="tab-panel" role="tabpanel" data-panel="article" hidden>
+          <div class="groups">
+            <fieldset class="group">
+              <legend>正文宽度</legend>
+              <label class="choice"><input type="radio" name="articleWidth" value="narrow" /><span>窄</span></label>
+              <label class="choice"><input type="radio" name="articleWidth" value="comfortable" /><span>适中</span></label>
+              <label class="choice"><input type="radio" name="articleWidth" value="wide" /><span>宽</span></label>
+            </fieldset>
+            <fieldset class="group">
+              <legend>深色模式</legend>
+              <label class="choice"><input id="invert-articles" type="checkbox" /><span>反色显示词条</span></label>
+              <p class="group-note">关闭后，词条在深色模式中保持原有的浅色纸面</p>
+            </fieldset>
+            <fieldset class="group wide">
+              <legend>查词操作</legend>
+              <p class="group-note plain">双击词条正文中的词继续查询；<kbd>Ctrl K</kbd> 聚焦搜索框；<kbd>Alt ←</kbd> / <kbd>Alt →</kbd> 后退与前进。</p>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="tab-panel" role="tabpanel" data-panel="data" hidden>
+          <div class="groups">
+            <fieldset class="group">
+              <legend>查询历史</legend>
+              <p class="group-note plain">最近查过的词只保存在本机。</p>
+              <button id="clear-history" class="button" type="button">清除历史</button>
+            </fieldset>
+            <fieldset class="group">
+              <legend>索引</legend>
+              <p class="group-note plain">词典变化后，可在“词典库”中为单部词典重建索引。</p>
+            </fieldset>
+            <fieldset class="group wide">
+              <legend>数据位置</legend>
+              <code id="data-path" class="data-path"></code>
+            </fieldset>
+          </div>
+        </section>
+      </div>
+      <footer class="dialog-footer">
+        <span class="footer-note">更改会立即生效</span>
+        <button class="button primary" type="button" data-close>完成</button>
+      </footer>
     </dialog>
 
     <div id="toast" class="toast" popover="manual" role="status"></div>
-    <div id="caption-tip" class="caption-tip" hidden></div>
   </body>
 </html>

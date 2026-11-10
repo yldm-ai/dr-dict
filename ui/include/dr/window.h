@@ -18,7 +18,9 @@ enum class ShellStyle
 class Window
 {
   public:
-    bool create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio = 0.6, double height_ratio = 0.75);
+    /** `theme` is applied before the window is first shown, so the first frame already matches it. */
+    bool create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio = 0.6, double height_ratio = 0.75,
+                const std::string &theme = "light");
     HWND handle() const
     {
         return hwnd_;
@@ -26,6 +28,10 @@ class Window
     RECT content_bounds() const;
     void set_style(ShellStyle style);
     void set_theme(const std::string &theme);
+    /** The theme's window background (0xRRGGBB), equal to the page's --bg. */
+    UINT32 background() const { return caption_background_; }
+    /** "light" or "dark", with "system" resolved from the Windows app theme. */
+    const char *resolved_theme() const { return resolved_theme_; }
     void set_fullscreen(bool enabled);
     bool fullscreen() const { return fullscreen_; }
     // Hides the title bar of either shell while keeping the window, its content position,
@@ -72,8 +78,9 @@ class Window
     WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
     LONG_PTR windowed_style_ = 0;
     UINT32 caption_background_ = 0xffffff;
+    const char *resolved_theme_ = "light";
     UINT32 caption_text_ = 0x37352f;
-    UINT32 caption_hover_ = 0xf1f1ef;
+    UINT32 caption_hover_ = 0xefefed;
     int hot_ = HTNOWHERE, pressed_ = HTNOWHERE, tip_ = HTNOWHERE;
     std::wstring title_ = L"DR Dict";
     Microsoft::WRL::ComPtr<ID2D1Factory> factory_;

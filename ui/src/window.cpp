@@ -21,7 +21,8 @@ int Window::caption_height() const
     const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
     return -frame.top-(IsZoomed(hwnd_)?resize:0);
 }
-bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio)
+bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio,
+                    const std::string &theme)
 {
     width_ratio_ = width_ratio;
     height_ratio_ = height_ratio;
@@ -57,8 +58,17 @@ bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, dou
         return false;
     update_icons();
     apply_frame();
+    set_theme(theme);
+    // Shown before its first Direct2D frame (factory, fonts and render target take ~100 ms),
+    // the window would appear as a blank white surface. Paint that frame while cloaked and
+    // uncloak once DWM has it, so the first visible frame already has the theme background.
+    BOOL cloak = TRUE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloak, sizeof(cloak));
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
+    DwmFlush();
+    cloak = FALSE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloak, sizeof(cloak));
     return true;
 }
 void Window::update_icons()
@@ -122,6 +132,7 @@ void Window::set_theme(const std::string &theme)
                      L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size);
     // Match the web application's --bg, --text and --hover in styles.css.
     const bool dark = theme == "dark" || (follow_system_theme_ && light == 0);
+    resolved_theme_ = dark ? "dark" : "light";
     caption_background_ = dark ? 0x191919 : 0xffffff;
     caption_text_ = dark ? 0xe3e2df : 0x37352f;
     caption_hover_ = dark ? 0x2a2a29 : 0xefefed;
@@ -259,7 +270,9 @@ void Window::paint()
     BeginPaint(hwnd_, &ps);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    if (draws_caption() && rc.right > 0 && rc.bottom > 0)
+    // The Direct2D shell owns the whole client area: until WebView2 paints, the content
+    // area shows the theme background (the page's --bg) instead of an uncleared black target.
+    if (style_ == ShellStyle::Direct2D && rc.right > 0 && rc.bottom > 0)
     {
         if (!factory_)
             D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
@@ -339,9 +352,10 @@ void Window::paint()
             auto size = target_->GetSize();
             const float height=caption_height()*96.0f/GetDpiForWindow(hwnd_);
             target_->BeginDraw();
+            target_->Clear(D2D1::ColorF(caption_background_));
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
             target_->CreateSolidColorBrush(D2D1::ColorF(caption_background_), &brush);
-            if (brush)
+            if (brush && draws_caption())
             {
                 target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
                 brush->SetColor(D2D1::ColorF(caption_text_));

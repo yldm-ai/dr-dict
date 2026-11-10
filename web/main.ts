@@ -1,10 +1,13 @@
 import { $, call, escape, on, toast } from './bridge.ts';
 import { back, currentWord, forward, initArticles, lookup, refresh, renderHome, setWordShownHandler, showHome } from './articles.ts';
 import { brandMark, hydrateIcons } from './icons.ts';
-import { addDictionaries, initLibrary, openLibrary } from './library-dialog.ts';
+import { addDictionaries, initLibrary, resetLibrary } from './library-panel.ts';
 import { initSettings, openSettings } from './settings-dialog.ts';
+import { Tooltips } from './tooltip.ts';
 import { effectiveTheme, onSystemThemeChange, state, subscribe } from './state.ts';
 
+// Self-drawn hover tips everywhere, as in DR Reader (native title tooltips never appear).
+const tooltips = new Tooltips();
 const input = $<HTMLInputElement>('search');
 const listElement = $('word-list');
 const listLabel = $('list-label');
@@ -194,10 +197,6 @@ function initKeyboard(): void {
   });
 }
 
-function updateLibraryCount(): void {
-  if (!state.importing) $('library-count').textContent = String(state.dictionaries.length);
-}
-
 async function bootstrap(): Promise<void> {
   const brand = document.querySelector('.brand-mark')!;
   brand.innerHTML = brandMark;
@@ -206,11 +205,10 @@ async function bootstrap(): Promise<void> {
   initKeyboard();
   initArticles({ focusSearch });
   initLibrary(on);
-  initSettings();
+  initSettings({ onTabChange: (tab) => tab === 'library' && resetLibrary() });
   $('back').addEventListener('click', back);
   $('forward').addEventListener('click', forward);
-  $('open-library').addEventListener('click', openLibrary);
-  $('open-settings').addEventListener('click', openSettings);
+  $('open-settings').addEventListener('click', () => openSettings());
   $('home').addEventListener('click', (event) => {
     const action = (event.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'add-files') void addDictionaries('files');
@@ -221,7 +219,6 @@ async function bootstrap(): Promise<void> {
     focusSearch('');
   });
   subscribe('dictionaries', () => {
-    updateLibraryCount();
     renderHome();
     if (!input.value.trim()) showHistory();
     else scheduleSuggest();
@@ -242,10 +239,9 @@ async function bootstrap(): Promise<void> {
     refresh();
   });
   on('caption-tooltip', ({ text, left, width }) => {
-    const tip = $('caption-tip');
-    tip.textContent = text;
-    tip.hidden = !text;
-    if (text) tip.style.left = `${left + width / 2}px`;
+    // A Direct2D caption button's tip: the button ends at the top edge of the web content.
+    if (text) tooltips.show({ left, width, top: -1, height: 1 }, text);
+    else tooltips.hide();
   });
 
   try {
@@ -259,7 +255,6 @@ async function bootstrap(): Promise<void> {
   }
   applyTheme();
   previous = `${effectiveTheme()}|${state.settings.invertArticles}|${state.settings.articleWidth}`;
-  updateLibraryCount();
   showHome();
   showHistory();
   document.body.classList.add('ready');

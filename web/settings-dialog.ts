@@ -2,14 +2,31 @@ import { $, call, toast } from './bridge.ts';
 import { hydrateIcons } from './icons.ts';
 import { publish, state, type Settings } from './state.ts';
 
+export type Tab = 'library' | 'interface' | 'article' | 'data';
 const dialog = $<HTMLDialogElement>('settings-dialog');
+const tabs = [...dialog.querySelectorAll<HTMLButtonElement>('.tab')];
+let onTabChange: (tab: Tab) => void = () => {};
+
+export function settingsOpen(): boolean {
+  return dialog.open;
+}
+export function currentTab(): Tab {
+  return (tabs.find((t) => t.getAttribute('aria-selected') === 'true')?.dataset.tab ?? 'library') as Tab;
+}
+
+function select(tab: Tab): void {
+  for (const button of tabs) {
+    const selected = button.dataset.tab === tab;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of dialog.querySelectorAll<HTMLElement>('.tab-panel')) panel.hidden = panel.dataset.panel !== tab;
+  onTabChange(tab);
+}
 
 function render(): void {
-  for (const group of dialog.querySelectorAll<HTMLElement>('.segmented')) {
-    const value = String(state.settings[group.dataset.setting as keyof Settings]);
-    for (const button of group.querySelectorAll<HTMLButtonElement>('button'))
-      button.setAttribute('aria-pressed', String(button.dataset.value === value));
-  }
+  for (const input of dialog.querySelectorAll<HTMLInputElement>('input[type=radio]'))
+    input.checked = String(state.settings[input.name as keyof Settings]) === input.value;
   $<HTMLInputElement>('invert-articles').checked = state.settings.invertArticles;
   $('data-path').textContent = state.dataPath;
 }
@@ -28,26 +45,36 @@ async function save(patch: Partial<Settings>): Promise<void> {
   }
 }
 
-export function openSettings(): void {
+export function openSettings(tab?: Tab): void {
   render();
+  select(tab ?? currentTab());
   if (!dialog.open) dialog.showModal();
 }
 
-export function initSettings(): void {
+export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): void {
+  onTabChange = handlers.onTabChange;
   hydrateIcons(dialog);
   dialog.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    if (target === dialog || target.closest('[data-close]')) {
-      dialog.close();
-      return;
-    }
-    const option = target.closest<HTMLButtonElement>('.segmented button');
-    const group = option?.closest<HTMLElement>('.segmented');
-    if (option && group) void save({ [group.dataset.setting!]: option.dataset.value } as Partial<Settings>);
+    if (target === dialog || target.closest('[data-close]')) dialog.close();
+    const tab = target.closest<HTMLButtonElement>('.tab');
+    if (tab) select(tab.dataset.tab as Tab);
   });
-  $<HTMLInputElement>('invert-articles').addEventListener('change', (event) =>
-    void save({ invertArticles: (event.target as HTMLInputElement).checked }),
-  );
+  // Arrow keys move between tabs, as in a native property sheet.
+  dialog.querySelector('.tabs')!.addEventListener('keydown', (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return;
+    event.preventDefault();
+    const index = tabs.findIndex((t) => t.dataset.tab === currentTab());
+    const next = tabs[(index + (key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    select(next.dataset.tab as Tab);
+    next.focus();
+  });
+  dialog.addEventListener('change', (event) => {
+    const input = event.target as HTMLInputElement;
+    if (input.type === 'radio' && input.checked) void save({ [input.name]: input.value } as Partial<Settings>);
+    else if (input.id === 'invert-articles') void save({ invertArticles: input.checked });
+  });
   $('clear-history').addEventListener('click', async () => {
     try {
       state.history = await call('history.clear');

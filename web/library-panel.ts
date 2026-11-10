@@ -4,7 +4,7 @@ import { avatar, effectiveTheme, formatNames, publish, state, subscribe, type Di
 
 type ImportResult = { cancelled?: boolean; dictionaries?: Dictionary[]; added?: number; skipped?: number; errors?: string[] };
 
-const dialog = $<HTMLDialogElement>('library-dialog');
+const dialog = $<HTMLDialogElement>('settings-dialog');
 const list = $('dict-list');
 const about = $('dict-about');
 let confirming = '';
@@ -72,8 +72,10 @@ function setImporting(value: boolean): void {
     $('import-percent').textContent = '';
     $('import-bar').style.width = '0%';
   }
-  const button = $('open-library');
-  button.classList.toggle('busy', value);
+  const badge = $('settings-badge');
+  badge.hidden = !value;
+  badge.textContent = '';
+  $('open-settings').classList.toggle('busy', value);
   render();
 }
 
@@ -165,25 +167,21 @@ async function act(action: string, id: string, input?: HTMLInputElement): Promis
   }
 }
 
-export function openLibrary(): void {
+// Called when the settings dialog shows the library tab or closes.
+export function resetLibrary(): void {
   confirming = '';
   hideAbout();
   render();
-  if (!dialog.open) dialog.showModal();
 }
 
 export function initLibrary(on: (event: string, handler: (message: any) => void) => void): void {
-  hydrateIcons(dialog);
+  hydrateIcons(list.parentElement!);
   subscribe('dictionaries', () => {
     if (dialog.open) render();
   });
   $('add-files').addEventListener('click', () => void addDictionaries('files'));
   $('add-folder').addEventListener('click', () => void addDictionaries('folder'));
   $('about-back').addEventListener('click', hideAbout);
-  dialog.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement;
-    if (target === dialog || target.closest('[data-close]')) dialog.close();
-  });
   dialog.addEventListener('close', hideAbout);
   list.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
@@ -203,7 +201,7 @@ export function initLibrary(on: (event: string, handler: (message: any) => void)
     $('import-name').textContent = `正在建立索引：${p.name ?? ''}${position}`;
     $('import-percent').textContent = `${percent}%`;
     $('import-bar').style.width = `${percent}%`;
-    $('library-count').textContent = `${percent}%`;
+    $('settings-badge').textContent = `${percent}%`;
   });
   on('import-done', (result) => {
     setImporting(false);

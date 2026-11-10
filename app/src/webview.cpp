@@ -67,6 +67,11 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     }
                                     controller_ = controller;
                                     controller_->get_CoreWebView2(&view_);
+                                    // Transparent until the page paints, so the window's theme background shows
+                                    // through instead of a white flash (as in DR Reader).
+                                    ComPtr<ICoreWebView2Controller2> controller2;
+                                    if (SUCCEEDED(controller_.As(&controller2)))
+                                        controller2->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0, 0, 0, 0});
                                     controller_->put_Bounds(bounds_);
                                     configure(web_root);
                                     return S_OK;

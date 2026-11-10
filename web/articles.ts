@@ -94,7 +94,7 @@ function show(result: LookupResult, fromHistory = false): void {
   if (!result.results.length) {
     const suggestions = result.suggestions ?? [];
     results.innerHTML = `${hero}<div class="not-found">
-        <p>${state.dictionaries.some((d) => d.enabled) ? '已启用的词典中都没有收录这个词。检查一下拼写，或试试下面这些词：' : '还没有启用任何词典。打开词典库添加或启用词典。'}</p>
+        <p>${state.dictionaries.some((d) => d.enabled) ? '已启用的词典中都没有收录这个词。检查一下拼写，或试试下面这些词：' : '还没有启用任何词典。在“设置 → 词典库”中添加或启用词典。'}</p>
         ${suggestions.length ? `<div class="chips">${suggestions.map((s) => `<button class="chip" type="button" data-word="${escape(s)}">${escape(s)}</button>`).join('')}</div>` : ''}
       </div>`;
     jump.innerHTML = '';
