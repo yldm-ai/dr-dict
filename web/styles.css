@@ -393,7 +393,9 @@ body[data-theme='dark'] .avatar.letter { color: hsl(var(--hue) 45% 78%); backgro
 }
 .dialog[open] { display: flex; flex-direction: column; animation: dialog-in 160ms var(--ease); }
 /* The page behind a dialog keeps its colours; the dialog stands out by its shadow alone. */
-.dialog::backdrop { background: transparent; }
+/* Same tint as the native title bar while dimmed (Window::dim_alpha). */
+.dialog::backdrop { background: rgb(0 0 0 / 0.3); }
+body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
 /* Dialog title bars follow the Windows caption: a 12px title at the top-left and a square close
    button near the top-right corner. */

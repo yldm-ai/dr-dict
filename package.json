@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "build": "pnpm typecheck && vite build"
+    "build": "pnpm typecheck && vite build",
+    "build:ascii": "tsc --noEmit && node scripts/vite-build.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2",

@@ -39,6 +39,11 @@ class Window
     void set_borderless(bool enabled);
     bool borderless() const { return borderless_; }
     void set_title(const std::wstring &title);
+    // Darkens the title bar while the page shows a modal dialog over its own dimmed content.
+    // The tint matches the page's dialog backdrop (black at dim_alpha()).
+    void set_dimmed(bool dimmed);
+    bool dimmed() const { return dimmed_; }
+    float dim_alpha() const { return resolved_theme_[0] == 'd' ? 0.5f : 0.3f; }
     void post(std::function<void()> action);
     std::function<void()> on_resize;
     std::function<void()> on_close;
@@ -68,7 +73,11 @@ class Window
     // The custom caption is drawn only by a windowed Direct2D shell that shows its title bar.
     bool draws_caption() const { return style_ == ShellStyle::Direct2D && !fullscreen_ && !borderless_; }
     RECT screen_content() const;
+    void update_dim();
     HWND hwnd_ = nullptr;
+    // A click-through layered popup over the system (Mica) title bar, which the app cannot paint.
+    HWND dim_ = nullptr;
+    bool dimmed_ = false;
     int icon_resource_ = 0;
     HICON small_icon_ = nullptr, large_icon_ = nullptr;
     ShellStyle style_ = ShellStyle::Mica;

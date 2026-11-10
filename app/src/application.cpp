@@ -213,6 +213,12 @@ void Application::receive(const Json &request)
             webview_.send({{"id", id}, {"result", true}});
             return;
         }
+        if (method == "window.dim")
+        {
+            window_.set_dimmed(params.value("dimmed", false));
+            webview_.send({{"id", id}, {"result", true}});
+            return;
+        }
         if (method == "window.close")
         {
             DestroyWindow(window_.handle());

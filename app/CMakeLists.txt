@@ -11,13 +11,16 @@ find_program(DR_PNPM_EXECUTABLE NAMES pnpm.cmd pnpm REQUIRED)
 file(GLOB_RECURSE DR_FRONTEND_SOURCES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/web/*.js" "${PROJECT_SOURCE_DIR}/web/*.ts"
   "${PROJECT_SOURCE_DIR}/web/*.css" "${PROJECT_SOURCE_DIR}/web/*.html")
+# MSBuild decodes custom-build output with the OEM code page whatever chcp says, so Vite's UTF-8
+# "✓ built in" would show as "Γ£ô"; scripts/vite-build.mjs rewrites the build log to ASCII.
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/frontend.stamp"
   BYPRODUCTS "${PROJECT_SOURCE_DIR}/dist/index.html"
-  COMMAND "${DR_PNPM_EXECUTABLE}" run build
+  COMMAND "${DR_PNPM_EXECUTABLE}" --silent run build:ascii
   COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/frontend.stamp"
   WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   DEPENDS ${DR_FRONTEND_SOURCES} "${PROJECT_SOURCE_DIR}/package.json"
     "${PROJECT_SOURCE_DIR}/pnpm-lock.yaml" "${PROJECT_SOURCE_DIR}/tsconfig.json" "${PROJECT_SOURCE_DIR}/vite.config.ts"
+    "${PROJECT_SOURCE_DIR}/scripts/vite-build.mjs"
   COMMENT "Type checking and bundling the WebView2 UI with Vite"
   VERBATIM)
 add_custom_target(dr-assets

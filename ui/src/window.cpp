@@ -112,6 +112,70 @@ void Window::set_title(const std::wstring &title)
     SetWindowTextW(hwnd_, title.c_str());
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
+void Window::set_dimmed(bool dimmed)
+{
+    if (dimmed_ == dimmed)
+        return;
+    dimmed_ = dimmed;
+    if (dimmed)
+        caption_tip(HTNOWHERE);
+    update_dim();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+// The Direct2D caption paints its own tint; the system caption gets an owned popup that sits
+// exactly over the visible title bar, lets clicks through (the window can still be dragged)
+// and never takes activation.
+void Window::update_dim()
+{
+    const bool system_caption = style_ == ShellStyle::Mica && !fullscreen_ && !borderless_;
+    if (!dimmed_ || !system_caption || IsIconic(hwnd_))
+    {
+        if (dim_)
+            ShowWindow(dim_, SW_HIDE);
+        return;
+    }
+    if (!dim_)
+    {
+        const auto instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
+        WNDCLASSEXW wc{sizeof(wc)};
+        wc.hInstance = instance;
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.lpszClassName = L"DRDict.CaptionDim";
+        wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+        RegisterClassExW(&wc);
+        dim_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                               wc.lpszClassName, L"", WS_POPUP, 0, 0, 0, 0, hwnd_, nullptr, instance, nullptr);
+        if (!dim_)
+            return;
+        // No DWM shadow or rounding of its own: the region below gives it the window's top corners.
+        DWORD corners = 1;
+        DwmSetWindowAttribute(dim_, 33, &corners, sizeof(corners));
+    }
+    SetLayeredWindowAttributes(dim_, 0, static_cast<BYTE>(dim_alpha() * 255 + 0.5f), LWA_ALPHA);
+    RECT frame{};
+    if (FAILED(DwmGetWindowAttribute(hwnd_, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))))
+        GetWindowRect(hwnd_, &frame);
+    POINT client{};
+    ClientToScreen(hwnd_, &client);
+    const int width = frame.right - frame.left, height = client.y - frame.top;
+    if (width <= 0 || height <= 0)
+    {
+        ShowWindow(dim_, SW_HIDE);
+        return;
+    }
+    // Windows 11 rounds the top corners of a restored window by 8 px; cover the rest square.
+    HRGN region = CreateRectRgn(0, 0, width, height);
+    if (!IsZoomed(hwnd_))
+    {
+        const int radius = scale(8);
+        HRGN round = CreateRoundRectRgn(0, 0, width + 1, height + radius * 2, radius * 2, radius * 2);
+        CombineRgn(region, region, round, RGN_AND);
+        DeleteObject(round);
+    }
+    SetWindowRgn(dim_, region, FALSE); // the window owns the region from here
+    SetWindowPos(dim_, nullptr, frame.left, frame.top, width, height, SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    InvalidateRect(dim_, nullptr, TRUE);
+}
 void Window::set_style(ShellStyle style)
 {
     if(style_==style)return;
@@ -138,6 +202,7 @@ void Window::set_theme(const std::string &theme)
     caption_hover_ = dark ? 0x2a2a29 : 0xefefed;
     BOOL value = dark;
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
+    update_dim();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 void Window::set_fullscreen(bool enabled)
@@ -404,6 +469,11 @@ void Window::paint()
                         else target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 5, cx + 5, cy + 5), brush.Get());
                     }
                 }
+                if (dimmed_)
+                {
+                    brush->SetColor(D2D1::ColorF(0x000000, dim_alpha()));
+                    target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
+                }
             }
             if (target_->EndDraw() == D2DERR_RECREATE_TARGET)
                 target_.Reset();
@@ -490,7 +560,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         if (w == caption_tip_timer)
         {
             KillTimer(hwnd_, caption_tip_timer);
-            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && draws_caption() && on_caption_tooltip)
+            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && draws_caption() && !dimmed_ && on_caption_tooltip)
                 on_caption_tooltip(tip_ == HTMINBUTTON   ? L"最小化"
                                    : tip_ == HTCLOSE     ? L"关闭"
                                    : IsZoomed(hwnd_)     ? L"向下还原"
@@ -550,7 +620,14 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     case WM_ACTIVATE:
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;
+    case WM_WINDOWPOSCHANGED:
+        if (dimmed_)
+            update_dim();
+        break;
     case WM_DESTROY:
+        if (dim_)
+            DestroyWindow(dim_);
+        dim_ = nullptr;
         if (small_icon_)
             DestroyIcon(small_icon_);
         if (large_icon_)

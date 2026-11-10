@@ -48,12 +48,16 @@ async function save(patch: Partial<Settings>): Promise<void> {
 export function openSettings(tab?: Tab): void {
   render();
   select(tab ?? currentTab());
-  if (!dialog.open) dialog.showModal();
+  if (dialog.open) return;
+  dialog.showModal();
+  // The native title bar darkens together with the page behind the dialog.
+  void call('window.dim', { dimmed: true }).catch(() => {});
 }
 
 export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): void {
   onTabChange = handlers.onTabChange;
   hydrateIcons(dialog);
+  dialog.addEventListener('close', () => void call('window.dim', { dimmed: false }).catch(() => {}));
   dialog.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (target === dialog || target.closest('[data-close]')) dialog.close();
