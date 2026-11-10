@@ -18,7 +18,20 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
 - `words(dict, key, word, a, b)`，索引 `(key, dict)`。`key = fold_key(word)`：NFKD、去拉丁/希腊/西里尔组合附加符、小写、去标点空白（思路同 GoldenDict `Folding::apply`）。`a/b` 为格式定位：MDict 为解压后记录区的偏移/长度，StarDict 为 `.dict` 偏移/长度。
 - `resources(dict, key, volume, a, b)` —— `.mdd` 资源，key 为小写、`/` 分隔的相对路径。
 
+词典库元数据：
+- `dictionaries.json` 保存全部词典条目。移除的词典不删条目，而是标记 `removed`：停用、删除索引，界面放在折叠的“已移除”组里，可以恢复；文件不存在后才能清除。
+- `sources.json` 记录通过“添加文件夹”加入的文件夹。刷新时递归重扫这些文件夹，只加入新词典，不会动已移除的词典；单独再次添加某个文件则会恢复它。
+
 联想使用 `key >= ? AND key < ? || U+10FFFF` 的范围扫描；查询按 `key` 精确匹配，未命中时尝试英文原形。
+
+## 中文简繁
+
+`ChineseVariants`（`engine/src/chinese.cpp`）基于 OpenCC 1.4.2（Apache-2.0，FetchContent 静态链接）。构建时 OpenCC 用 Python 3 生成 `.ocd2` 词典，与所用配置一起复制到 `bin/<配置>/opencc/`。思路参考 GoldenDict-ng `dict/transliteration/chinese.cc`（多条转换链的结果合并查询），独立实现：
+
+1. 先用 `t2s`、`tw2s`、`hk2s`（选台湾用词或全部时加 `tw2sp`）把输入转成简体，因此任何地区的繁体输入都能命中。
+2. 再把每个简体写法转成所选标准：`s2t`、`s2tw`、`s2twp`、`s2hk`，选“全部”时四个都用。
+
+开启 `chineseConversion` 后，查询、联想与文章页都会合并这些写法：先给原写法，再给其他写法，文章按记录偏移去重。查询结果的 `variants` 列出另外命中的写法。
 
 ## 词条渲染
 

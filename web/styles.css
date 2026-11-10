@@ -73,6 +73,8 @@ body {
 }
 body.ready { opacity: 1; transition: opacity 120ms ease-out; }
 button { font: inherit; color: inherit; }
+/* Controls behave like native ones: a drag across them never selects their labels. */
+button, [role='tab'], label, legend, .switch { user-select: none; -webkit-user-select: none; }
 kbd {
   font: 500 11px/1 var(--font-ui);
   color: var(--muted);
@@ -215,6 +217,7 @@ body[data-theme='dark'] .sidebar { box-shadow: 0 4px 16px #00000040; }
 }
 .side-button.icon-only { flex: 0 0 34px; justify-content: center; padding: 0; }
 .side-button:hover { background: var(--hover); }
+.side-button:active { background: var(--selected); }
 .side-button .icon { color: var(--muted); }
 .count { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .side-button.busy .count { color: var(--accent); font-weight: 600; }
@@ -243,7 +246,11 @@ body[data-theme='dark'] .sidebar { box-shadow: 0 4px 16px #00000040; }
   flex-shrink: 0;
 }
 .icon-button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.icon-button:active:not(:disabled) { background: var(--selected); }
 .icon-button:disabled { opacity: 0.35; cursor: default; }
+/* One turn per run while an icon button works; a minimum of one turn is shown (library-panel.ts). */
+.icon-button.spinning .icon { animation: spin 600ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .icon-button.small { width: 28px; height: 28px; }
 .jump {
   display: flex;
@@ -350,6 +357,7 @@ body[data-theme='dark'] .avatar.letter { color: hsl(var(--hue) 45% 78%); backgro
   white-space: nowrap;
 }
 .chip:hover { background: var(--hover); border-color: var(--control-border); }
+.chip:active { background: var(--selected); }
 .home-tips { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--faint); font-size: 12px; }
 .home-tips kbd { margin-right: 4px; }
 .onboard { margin-top: 36px; padding-top: 24px; border-top: 1px solid var(--border); }
@@ -374,9 +382,14 @@ body[data-theme='dark'] .avatar.letter { color: hsl(var(--hue) 45% 78%); backgro
   transition: background 100ms, border-color 100ms;
 }
 .button:hover:not(:disabled) { background: var(--hover); }
+.button:active:not(:disabled) { background: var(--selected); }
 .button:disabled { opacity: 0.5; cursor: default; }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 500; }
 .button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.button.primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-hover) 86%, #000);
+  border-color: color-mix(in srgb, var(--accent-hover) 86%, #000);
+}
 .button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--control-border)); }
 .button.danger:hover { background: var(--danger-soft); }
 .button.ghost { border-color: transparent; background: transparent; padding: 0 8px; color: var(--muted); }
@@ -439,6 +452,7 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
   white-space: nowrap;
 }
 .tab:hover { color: var(--text); background: var(--hover); }
+.tab:active:not([aria-selected='true']) { background: var(--selected); }
 .tab[aria-selected='true'] { background: var(--bg); color: var(--strong); border-color: var(--border); font-weight: 500; }
 .tab-body {
   flex: 1;
@@ -464,6 +478,10 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 .choice { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--text); cursor: pointer; }
 .choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
 .group-note { margin: 2px 0 0 26px; color: var(--muted); font-size: 12px; }
+/* Options that belong to the switch above them, indented under its label. */
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); column-gap: 16px; margin-left: 26px; }
+.choice:has(input:disabled) { color: var(--faint); cursor: default; }
+.choice:has(input:disabled) input { cursor: default; }
 .group-note.plain { margin: 6px 0 0; line-height: 1.8; }
 .group .button { align-self: flex-start; margin-top: 10px; }
 .group .data-path { margin-top: 6px; }
@@ -477,6 +495,16 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 .import-text span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
 .bar { height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; }
 .bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 160ms linear; }
+.folder-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; font-size: 12px; }
+.folder-label { color: var(--muted); margin-right: 2px; }
+.folder-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 26px; padding: 0 2px 0 8px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
+.folder-chip .icon { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; }
+.folder-chip.missing { color: var(--faint); text-decoration: line-through; }
+.folder-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+.folder-remove { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.folder-remove .icon { width: 12px; height: 12px; }
+.folder-remove:hover { background: var(--hover); color: var(--text); }
+.folder-remove:active { background: var(--selected); }
 .dict-list { list-style: none; margin: 0; padding: 6px 8px 12px; overflow-y: auto; flex: 1; min-height: 0; }
 .dict-row {
   display: grid;
@@ -489,6 +517,19 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 .dict-row:hover { background: color-mix(in srgb, var(--hover) 70%, transparent); }
 .dict-row .avatar { width: 28px; height: 28px; border-radius: 6px; font-size: 13px; }
 .dict-row.disabled .dict-main, .dict-row.disabled .avatar { opacity: 0.5; }
+/* Removed dictionaries: a collapsed group after the library, rows greyed out. */
+.dict-group { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.dict-group-toggle {
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.dict-group-toggle:hover { background: var(--hover); color: var(--text); }
+.dict-group-toggle:active { background: var(--selected); }
+.dict-group-toggle .icon { width: 14px; height: 14px; transition: transform 160ms var(--ease); }
+.dict-group-toggle[aria-expanded='false'] .icon { transform: rotate(-90deg); }
+.dict-group-toggle .count { margin-left: 2px; font-size: 12px; color: var(--faint); }
+.dict-row.removed .dict-main, .dict-row.removed .avatar { opacity: 0.45; }
+.dict-row.removed .dict-actions { opacity: 1; }
 .dict-main { min-width: 0; }
 .dict-name { font-weight: 600; color: var(--strong); display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dict-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

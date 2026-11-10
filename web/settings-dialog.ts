@@ -28,6 +28,14 @@ function render(): void {
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input[type=radio]'))
     input.checked = String(state.settings[input.name as keyof Settings]) === input.value;
   $<HTMLInputElement>('invert-articles').checked = state.settings.invertArticles;
+  // Variant choices only apply while simplified/traditional lookup is on, and need OpenCC's data.
+  const conversion = $<HTMLInputElement>('chinese-conversion');
+  conversion.checked = state.settings.chineseConversion;
+  conversion.disabled = !state.chineseAvailable;
+  for (const input of dialog.querySelectorAll<HTMLInputElement>('input[name=chineseVariant]'))
+    input.disabled = !state.chineseAvailable || !state.settings.chineseConversion;
+  if (!state.chineseAvailable)
+    $('chinese-note').textContent = '未找到 OpenCC 数据（程序目录下的 opencc 文件夹），简繁查询不可用。';
   $('data-path').textContent = state.dataPath;
 }
 
@@ -39,6 +47,7 @@ async function save(patch: Partial<Settings>): Promise<void> {
   try {
     state.settings = await call<Settings>('settings.save', patch);
     publish('settings');
+    publish('saved');
     render();
   } catch (error) {
     toast((error as Error).message, 'error');
@@ -78,6 +87,7 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
     const input = event.target as HTMLInputElement;
     if (input.type === 'radio' && input.checked) void save({ [input.name]: input.value } as Partial<Settings>);
     else if (input.id === 'invert-articles') void save({ invertArticles: input.checked });
+    else if (input.id === 'chinese-conversion') void save({ chineseConversion: input.checked });
   });
   $('clear-history').addEventListener('click', async () => {
     try {

@@ -30,3 +30,4 @@ add_custom_target(dr-assets
 add_dependencies(dr-dict dr-assets)
 install(TARGETS dr-dict RUNTIME DESTINATION . COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/dist/" DESTINATION web COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/opencc" DESTINATION . COMPONENT Runtime)

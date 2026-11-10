@@ -80,12 +80,16 @@
           <div class="library-toolbar">
             <button id="add-files" class="button primary" type="button"><span data-icon="plus"></span>添加词典</button>
             <button id="add-folder" class="button" type="button"><span data-icon="folder"></span>添加文件夹</button>
+            <button id="refresh-library" class="icon-button" type="button" title="刷新：扫描已添加的文件夹并加入新词典，文件变化的重建索引" aria-label="刷新">
+              <span data-icon="refresh"></span>
+            </button>
             <span class="toolbar-note">支持 MDict（.mdx + .mdd）与 StarDict（.ifo），词典文件保留在原位置</span>
           </div>
           <div id="import-progress" class="import-progress" hidden>
             <div class="import-text"><span id="import-name">正在准备…</span><span id="import-percent"></span></div>
             <div class="bar"><span id="import-bar"></span></div>
           </div>
+          <div id="folder-list" class="folder-list" hidden></div>
           <ul id="dict-list" class="dict-list"></ul>
           <div id="dict-about" class="dict-about" hidden>
             <button id="about-back" class="button ghost" type="button"><span data-icon="arrow-left"></span>返回词典库</button>
@@ -123,6 +127,18 @@
               <legend>深色模式</legend>
               <label class="choice"><input id="invert-articles" type="checkbox" /><span>反色显示词条</span></label>
               <p class="group-note">关闭后，词条在深色模式中保持原有的浅色纸面</p>
+            </fieldset>
+            <fieldset class="group wide" id="chinese-group">
+              <legend>中文简繁</legend>
+              <label class="choice"><input id="chinese-conversion" type="checkbox" /><span>查中文时同时查简体和繁体</span></label>
+              <div class="choice-grid">
+                <label class="choice"><input type="radio" name="chineseVariant" value="t" /><span>繁体（OpenCC 标准）</span></label>
+                <label class="choice"><input type="radio" name="chineseVariant" value="tw" /><span>台湾正体</span></label>
+                <label class="choice"><input type="radio" name="chineseVariant" value="twp" /><span>台湾正体及台湾用词</span></label>
+                <label class="choice"><input type="radio" name="chineseVariant" value="hk" /><span>香港繁体</span></label>
+                <label class="choice"><input type="radio" name="chineseVariant" value="all" /><span>以上全部</span></label>
+              </div>
+              <p class="group-note" id="chinese-note">繁体输入会先转成简体再查。例：查“软件”也查“軟件”；选“台湾用词”时还查“軟體”。</p>
             </fieldset>
             <fieldset class="group wide">
               <legend>查词操作</legend>

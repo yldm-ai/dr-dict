@@ -1,6 +1,6 @@
 import { $, call, escape, formatNumber, toast } from './bridge.ts';
 import { brandMark, hydrateIcons } from './icons.ts';
-import { avatar, effectiveTheme, publish, state } from './state.ts';
+import { activeDictionaries, avatar, effectiveTheme, publish, state } from './state.ts';
 import { speak, stopSpeaking } from './speech.ts';
 
 type Hit = { id: string; name: string; count: number };
@@ -8,6 +8,8 @@ type LookupResult = {
   word: string;
   query: string;
   results: Hit[];
+  // Simplified/traditional writings that were looked up as well and found.
+  variants?: string[];
   suggestions?: string[];
   history?: { word: string; at: number }[];
 };
@@ -88,7 +90,9 @@ function show(result: LookupResult, fromHistory = false): void {
       <h1 class="hero-word">${escape(result.word)}</h1>
       <div class="hero-meta">${
         result.results.length
-          ? `在 ${result.results.length} 部词典中找到${redirected ? ` · 由“${escape(result.query)}”推断的原形` : ''}`
+          ? `在 ${result.results.length} 部词典中找到${redirected ? ` · 由“${escape(result.query)}”推断的原形` : ''}${
+              result.variants?.length ? ` · 同时查了 ${result.variants.map(escape).join('、')}` : ''
+            }`
           : '没有找到这个词'
       }</div>
     </header>`;
@@ -154,7 +158,7 @@ export function renderHome(): void {
       <h1 class="home-title">DR Dict</h1>
       <p class="home-lead">输入一个词，在你所有的词典里查找。</p>
       ${
-        state.dictionaries.length
+        activeDictionaries().length
           ? `<div class="home-stats">${enabled.length} 部词典已启用 · 共 ${formatNumber(entries)} 个词条</div>
              ${
                recent.length
@@ -183,6 +187,10 @@ export function renderHome(): void {
 export function refresh(): void {
   if (current) show(current);
   else renderHome();
+}
+/** Looks the shown word up again, for settings that change what a lookup finds. */
+export function requery(): void {
+  if (current) void lookup(current.query, { push: false });
 }
 
 function sectionFor(source: MessageEventSource | null): HTMLElement | null {

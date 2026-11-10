@@ -6,6 +6,7 @@
 
 - 导入 MDict（`.mdx`，自动带上 `.mdd`、`.1.mdd`、`.2.mdd`… 资源卷）与 StarDict（`.ifo/.idx[.gz]/.dict[.dz]/.syn`）；可选文件或整个文件夹（递归查找）。词典留在原位，只建立索引。
 - 词头联想（前缀，大小写/变音符/标点不敏感）、多词典并列查询、英文屈折形式回退（studies → study）。
+- 中文简繁同查（OpenCC，可选）：开启后查中文时同时查简体与繁体，繁体可选 OpenCC 标准、台湾正体、台湾正体及台湾用词、香港繁体或全部。
 - 每部词典的正文在独立 iframe 中渲染：词典自带 CSS/JS/图片/字体按相对路径从 `.mdd` 或词典目录读取，样式互不干扰；`entry://`、`bword://` 跳转查询，`sound://` 播放发音，外部链接用系统浏览器打开；双击正文中的词继续查询。
 - 词典库管理：启用/停用、排序、简介、重建索引、移除；文件丢失或变化时提示。
 - 浅色/深色/跟随系统主题（深色下可反色显示词条），Mica 或简洁标题栏，正文宽度，查询历史，前进/后退。
@@ -14,14 +15,14 @@
 
 ## 构建
 
-需要 Visual Studio 2026（C++ 桌面开发）、CMake ≥ 3.25、Node.js ≥ 22.18、pnpm，以及 WebView2 Runtime。
+需要 Visual Studio 2026（C++ 桌面开发）、CMake ≥ 3.25、Node.js ≥ 22.18、pnpm、Python 3（构建 OpenCC 词典数据时使用），以及 WebView2 Runtime。
 
 ```powershell
 ./scripts/build.ps1        # 安装前端依赖、配置、编译、运行测试
 ./scripts/build.ps1 -Run   # 同上并启动
 ```
 
-产物位于 `build/bin/Release/`：`dr-dict.exe`（需与同目录的 `web/` 一起分发）、`dr-engine-tests.exe`、`dr-dict-cli.exe`。
+产物位于 `build/bin/Release/`：`dr-dict.exe`（需与同目录的 `web/`、`opencc/` 一起分发）、`dr-engine-tests.exe`、`dr-dict-cli.exe`。
 
 命令行参数：`dr-dict.exe [--data-dir <目录>] [--shell mica|direct2d] [词典文件或文件夹...]`。默认数据目录为 `%LOCALAPPDATA%\DRDict`。
 

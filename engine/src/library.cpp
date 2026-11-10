@@ -243,8 +243,35 @@ Json Library::default_settings()
             {"shell", "mica"},
             {"invertArticles", true},
             {"articleWidth", "comfortable"},
+            // Look Chinese queries up in their simplified and traditional writings as well.
+            {"chineseConversion", false},
+            {"chineseVariant", "t"},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
             {"window", {{"widthRatio", 0.4}, {"heightRatio", 0.5}}}};
+}
+void Library::set_opencc_dir(const fs::path &dir)
+{
+    std::lock_guard lock(mutex_);
+    chinese_ = std::make_shared<ChineseVariants>(dir);
+}
+bool Library::chinese_available()
+{
+    std::lock_guard lock(mutex_);
+    return chinese_ && chinese_->available();
+}
+std::vector<std::string> Library::chinese_variants(const std::string &word)
+{
+    std::shared_ptr<ChineseVariants> chinese;
+    {
+        std::lock_guard lock(mutex_);
+        chinese = chinese_;
+    }
+    if (!chinese || !has_han(word))
+        return {};
+    auto current = settings();
+    if (!current.value("chineseConversion", false))
+        return {};
+    return chinese->expand(word, current.value("chineseVariant", std::string("t")));
 }
 Json Library::settings()
 {
@@ -280,6 +307,11 @@ Json Library::save_settings(const Json &patch)
         current["articleWidth"] = patch["articleWidth"];
     if (patch.contains("invertArticles") && patch["invertArticles"].is_boolean())
         current["invertArticles"] = patch["invertArticles"];
+    if (patch.contains("chineseConversion") && patch["chineseConversion"].is_boolean())
+        current["chineseConversion"] = patch["chineseConversion"];
+    if (patch.contains("chineseVariant") && patch["chineseVariant"].is_string() &&
+        valid_chinese_variant(patch["chineseVariant"]))
+        current["chineseVariant"] = patch["chineseVariant"];
     std::lock_guard lock(mutex_);
     write_atomic(root_ / "settings.json", current.dump(2));
     return current;
@@ -344,13 +376,46 @@ void Library::save_entries(const Json &list)
 {
     write_atomic(root_ / "dictionaries.json", Json{{"version", 1}, {"dictionaries", list}}.dump(2));
 }
+Json Library::load_sources()
+{
+    // Removed dictionaries are kept as entries marked "removed" in dictionaries.json; an older
+    // "excluded" id list here is ignored and dropped on the next save.
+    Json sources = {{"folders", Json::array()}};
+    try
+    {
+        auto path = root_ / "sources.json";
+        if (fs::exists(path))
+        {
+            auto data = Json::parse(read_file(path));
+            if (data.contains("folders") && data["folders"].is_array())
+                sources["folders"] = data["folders"];
+        }
+    }
+    catch (const std::exception &)
+    {
+    }
+    return sources;
+}
+void Library::save_sources(const Json &sources)
+{
+    write_atomic(root_ / "sources.json", sources.dump(2));
+}
 Json Library::status(const Json &meta)
 {
     Json item = meta;
     item.erase("files");
     std::error_code ec;
     std::string state = "ready";
-    if (!fs::exists(path8(meta.value("path", "")), ec))
+    const bool exists = fs::exists(path8(meta.value("path", "")), ec);
+    // A removed dictionary has no index; only whether its file still exists matters.
+    item["removed"] = meta.value("removed", false);
+    if (item["removed"] == true)
+    {
+        item["fileMissing"] = !exists;
+        item["status"] = "removed";
+        return item;
+    }
+    if (!exists)
         state = "missing";
     else if (meta.value("indexVersion", 0) != index_version)
         state = "stale";
@@ -412,7 +477,7 @@ std::vector<std::pair<int, std::string>> Library::enabled_numbers()
     {
         std::lock_guard lock(mutex_);
         for (auto &meta : load_entries())
-            if (meta.value("enabled", true))
+            if (meta.value("enabled", true) && !meta.value("removed", false))
                 ids.push_back(meta.value("id", ""));
     }
     std::vector<std::pair<int, std::string>> result;
@@ -494,46 +559,166 @@ Json Library::build(const fs::path &path, const std::string &id, const Progress 
     }
 }
 
+namespace
+{
+fs::path full_path(const fs::path &path)
+{
+    std::error_code ec;
+    auto result = fs::weakly_canonical(fs::absolute(path), ec);
+    return ec ? fs::absolute(path) : result;
+}
+// Whether `child` is `parent` or lies inside it (Windows paths compare case-insensitively).
+bool within(const fs::path &child, const fs::path &parent)
+{
+    auto c = lower_text(utf8(child.lexically_normal())), p = lower_text(utf8(parent.lexically_normal()));
+    std::replace(c.begin(), c.end(), '\\', '/');
+    std::replace(p.begin(), p.end(), '\\', '/');
+    while (p.size() > 1 && p.back() == '/')
+        p.pop_back();
+    return c == p || (c.starts_with(p) && c[p.size()] == '/');
+}
+} // namespace
+
 Json Library::add(const std::vector<fs::path> &paths, const Progress &progress)
 {
-    std::vector<fs::path> candidates;
+    return add_paths(paths, progress, false);
+}
+
+Json Library::rescan(const Progress &progress)
+{
+    std::vector<fs::path> existing;
+    {
+        std::lock_guard lock(mutex_);
+        // Keep the document alive: a range-for over load_sources()["folders"] would iterate a
+        // member of a temporary that is already destroyed (C++20 range-for lifetime rules).
+        const auto sources = load_sources();
+        for (auto &folder : sources["folders"])
+        {
+            std::error_code ec;
+            auto path = path8(folder.get<std::string>());
+            if (fs::is_directory(path, ec))
+                existing.push_back(path);
+        }
+    }
+    auto result = existing.empty()
+                      ? Json{{"dictionaries", list()}, {"added", 0}, {"skipped", 0}, {"errors", Json::array()}}
+                      : add_paths(existing, progress, true);
+    result["folders"] = existing.size();
+    return result;
+}
+
+Json Library::folders()
+{
+    std::lock_guard lock(mutex_);
+    Json result = Json::array();
+    const auto sources = load_sources();
+    for (auto &folder : sources["folders"])
+    {
+        std::error_code ec;
+        result.push_back({{"path", folder}, {"exists", fs::is_directory(path8(folder.get<std::string>()), ec)}});
+    }
+    return result;
+}
+
+Json Library::remove_folder(const std::string &path)
+{
+    {
+        std::lock_guard lock(mutex_);
+        auto sources = load_sources();
+        Json next = Json::array();
+        for (auto &folder : sources["folders"])
+            if (folder.get<std::string>() != path)
+                next.push_back(folder);
+        sources["folders"] = next;
+        save_sources(sources);
+    }
+    return folders();
+}
+
+Json Library::add_paths(const std::vector<fs::path> &paths, const Progress &progress, bool rescan)
+{
+    // Each candidate remembers whether the user picked it directly or it was found in a folder.
+    std::vector<std::pair<fs::path, bool>> candidates;
     Json errors = Json::array();
+    std::vector<fs::path> picked_folders;
     for (auto &input : paths)
     {
         std::error_code ec;
         if (fs::is_directory(input, ec))
         {
+            picked_folders.push_back(full_path(input));
             for (fs::recursive_directory_iterator it(input, fs::directory_options::skip_permission_denied, ec), end;
                  it != end; it.increment(ec))
             {
                 if (ec)
                     break;
                 if (it->is_regular_file(ec) && is_dictionary_file(it->path()))
-                    candidates.push_back(it->path());
+                    candidates.emplace_back(it->path(), true);
             }
         }
         else if (is_dictionary_file(input))
-            candidates.push_back(input);
+            candidates.emplace_back(input, false);
         else
             errors.push_back(utf8(input.filename()) + ": 请选择 .mdx 或 .ifo 文件");
     }
     std::sort(candidates.begin(), candidates.end());
+    if (!rescan)
+    {
+        std::lock_guard lock(mutex_);
+        auto sources = load_sources();
+        {
+            // Remember new folders; one inside a remembered folder is already covered, and one
+            // that contains remembered folders replaces them.
+            for (auto &folder : picked_folders)
+            {
+                Json kept = Json::array();
+                bool covered = false;
+                for (auto &known : sources["folders"])
+                {
+                    auto known_path = path8(known.get<std::string>());
+                    if (within(folder, known_path))
+                        covered = true;
+                    if (covered || !within(known_path, folder))
+                        kept.push_back(known);
+                }
+                if (!covered)
+                    kept.push_back(utf8(folder));
+                sources["folders"] = kept;
+            }
+            save_sources(sources);
+        }
+    }
     int added = 0, skipped = 0;
     for (size_t i = 0; i < candidates.size(); ++i)
     {
-        std::error_code ec;
-        auto path = fs::weakly_canonical(fs::absolute(candidates[i]), ec);
-        if (ec)
-            path = fs::absolute(candidates[i]);
+        auto path = full_path(candidates[i].first);
         auto id = make_id(path);
+        bool removed = false, known = false;
         {
             std::lock_guard lock(mutex_);
-            auto list = load_entries();
-            if (std::any_of(list.begin(), list.end(), [&](const Json &m) { return m.value("id", "") == id; }))
+            for (auto &m : load_entries())
+                if (m.value("id", "") == id)
+                    known = true, removed = m.value("removed", false);
+        }
+        if (known)
+        {
+            // A removed dictionary stays in the "removed" group when its folder is scanned; picking
+            // its file directly restores it.
+            if (removed && !rescan && !candidates[i].second)
             {
-                ++skipped;
-                continue;
+                try
+                {
+                    restore(id, progress);
+                    ++added;
+                }
+                catch (const std::exception &e)
+                {
+                    errors.push_back(utf8(path.filename()) + ": " + e.what());
+                }
             }
+            else
+                ++skipped;
+            continue;
         }
         try
         {
@@ -557,7 +742,7 @@ Json Library::add(const std::vector<fs::path> &paths, const Progress &progress)
             errors.push_back(utf8(path.filename()) + ": " + e.what());
         }
     }
-    if (candidates.empty() && errors.empty())
+    if (candidates.empty() && errors.empty() && !rescan)
         errors.push_back("所选位置没有找到 .mdx 或 .ifo 词典");
     return {{"dictionaries", list()}, {"added", added}, {"skipped", skipped}, {"errors", errors}};
 }
@@ -565,15 +750,70 @@ Json Library::add(const std::vector<fs::path> &paths, const Progress &progress)
 void Library::remove(const std::string &id)
 {
     {
+        // The entry stays, marked removed, so the library can list it and folder scans skip it;
+        // only its index is dropped.
         std::lock_guard lock(mutex_);
         auto list = load_entries();
-        Json next = Json::array();
         for (auto &m : list)
-            if (m.value("id", "") != id)
-                next.push_back(m);
-        save_entries(next);
+            if (m.value("id", "") == id)
+            {
+                m["removed"] = true;
+                m["enabled"] = false;
+            }
+        save_entries(list);
         open_.erase(id);
     }
+    drop_index(id);
+}
+
+Json Library::restore(const std::string &id, const Progress &progress)
+{
+    Json old;
+    {
+        std::lock_guard lock(mutex_);
+        old = entry(id);
+        open_.erase(id);
+    }
+    auto meta = build(path8(old.value("path", "")), id, progress);
+    std::lock_guard lock(mutex_);
+    auto list = load_entries();
+    for (auto &m : list)
+        if (m.value("id", "") == id)
+            m = meta; // enabled, no longer removed
+    save_entries(list);
+    Json result = Json::array();
+    for (auto &item : list)
+        result.push_back(status(item));
+    return result;
+}
+
+Json Library::forget(const std::string &id)
+{
+    std::lock_guard lock(mutex_);
+    auto list = load_entries();
+    Json next = Json::array();
+    for (auto &m : list)
+    {
+        if (m.value("id", "") != id)
+            next.push_back(m);
+        // The removed entry is what keeps folder scans from adding the file again, so it may
+        // only be forgotten once the file itself is gone.
+        else
+        {
+            std::error_code ec;
+            if (!m.value("removed", false) || fs::exists(path8(m.value("path", "")), ec))
+                throw std::runtime_error("只能清除文件已不存在的已移除词典");
+        }
+    }
+    save_entries(next);
+    Json result = Json::array();
+    for (auto &item : next)
+        result.push_back(status(item));
+    return result;
+}
+
+void Library::drop_index(const std::string &id)
+{
     Database database(root_ / "index.db");
     exec(database.db, "BEGIN IMMEDIATE");
     {
@@ -601,7 +841,11 @@ Json Library::update(const std::string &id, const Json &patch)
         if (m.value("id", "") == id)
         {
             if (patch.contains("enabled") && patch["enabled"].is_boolean())
+            {
+                if (m.value("removed", false) && patch["enabled"] == true)
+                    throw std::runtime_error("该词典已移除，请先恢复");
                 m["enabled"] = patch["enabled"];
+            }
             if (patch.contains("name") && patch["name"].is_string())
             {
                 auto name = trim(patch["name"].get<std::string>());
@@ -643,6 +887,8 @@ Json Library::reindex(const std::string &id, const Progress &progress)
     {
         std::lock_guard lock(mutex_);
         old = entry(id);
+        if (old.value("removed", false))
+            throw std::runtime_error("该词典已移除，请先恢复");
         open_.erase(id);
     }
     auto meta = build(path8(old.value("path", "")), id, progress);
@@ -679,9 +925,17 @@ Json Library::info(const std::string &id)
 
 Json Library::suggest(const std::string &query, size_t limit)
 {
-    auto key = fold_key(query);
     Json result = Json::array();
-    if (key.empty())
+    std::vector<std::string> keys;
+    for (auto &w : [&] {
+             std::vector<std::string> all = {query};
+             for (auto &v : chinese_variants(query))
+                 all.push_back(v);
+             return all;
+         }())
+        if (auto key = fold_key(w); !key.empty() && std::find(keys.begin(), keys.end(), key) == keys.end())
+            keys.push_back(key);
+    if (keys.empty())
         return result;
     std::unordered_set<int> enabled;
     for (auto &[num, id] : enabled_numbers())
@@ -689,18 +943,22 @@ Json Library::suggest(const std::string &query, size_t limit)
     if (enabled.empty())
         return result;
     std::lock_guard lock(db_mutex_);
-    Statement s(db_, "SELECT key, word, dict FROM words WHERE key >= ?1 AND key < ?2 ORDER BY key LIMIT ?3");
-    s.bind(1, key).bind(2, key + "\xf4\x8f\xbf\xbf").bind(3, static_cast<int64_t>(limit * 8));
-    std::string previous;
-    while (s.step() && result.size() < limit)
+    // The typed writing comes first; its simplified/traditional variants fill the rest.
+    std::unordered_set<std::string> seen;
+    for (auto &key : keys)
     {
-        if (!enabled.count(static_cast<int>(s.integer(2))))
-            continue;
-        auto k = s.text(0);
-        if (k == previous)
-            continue;
-        previous = k;
-        result.push_back(s.text(1));
+        Statement s(db_, "SELECT key, word, dict FROM words WHERE key >= ?1 AND key < ?2 ORDER BY key LIMIT ?3");
+        s.bind(1, key).bind(2, key + "\xf4\x8f\xbf\xbf").bind(3, static_cast<int64_t>(limit * 8));
+        while (s.step() && result.size() < limit)
+        {
+            if (!enabled.count(static_cast<int>(s.integer(2))))
+                continue;
+            if (!seen.insert(s.text(0)).second)
+                continue;
+            result.push_back(s.text(1));
+        }
+        if (result.size() >= limit)
+            break;
     }
     return result;
 }
@@ -715,29 +973,52 @@ Json Library::lookup(const std::string &input)
         for (auto &m : load_entries())
             names[m.value("id", "")] = m.value("name", "");
     }
-    auto find = [&](const std::string &w) {
+    // Counts entries per dictionary over several writings of the word; `matched` collects the
+    // writings that were found at all.
+    auto find = [&](const std::vector<std::string> &writings, std::vector<std::string> *matched) {
         Json hits = Json::array();
-        auto key = fold_key(w);
-        if (key.empty())
-            return hits;
         std::map<int, int64_t> counts;
+        std::vector<std::string> keys;
         {
             std::lock_guard lock(db_mutex_);
-            Statement s(db_, "SELECT dict, COUNT(*) FROM words WHERE key=? GROUP BY dict");
-            s.bind(1, key);
-            while (s.step())
-                counts[static_cast<int>(s.integer(0))] = s.integer(1);
+            for (auto &w : writings)
+            {
+                auto key = fold_key(w);
+                if (key.empty() || std::find(keys.begin(), keys.end(), key) != keys.end())
+                    continue;
+                keys.push_back(key);
+                Statement s(db_, "SELECT dict, COUNT(*) FROM words WHERE key=? GROUP BY dict");
+                s.bind(1, key);
+                bool any = false;
+                while (s.step())
+                {
+                    counts[static_cast<int>(s.integer(0))] += s.integer(1);
+                    any = true;
+                }
+                if (any && matched)
+                    matched->push_back(w);
+            }
         }
         for (auto &[num, id] : order)
             if (auto it = counts.find(num); it != counts.end())
                 hits.push_back({{"id", id}, {"name", names[id]}, {"count", it->second}});
         return hits;
     };
-    Json result = {{"word", word}, {"query", word}, {"results", find(word)}};
+    auto variants = chinese_variants(word);
+    std::vector<std::string> writings = {word}, matched;
+    writings.insert(writings.end(), variants.begin(), variants.end());
+    Json result = {{"word", word}, {"query", word}, {"results", find(writings, &matched)}};
+    // Simplified/traditional writings that also matched, for the result header.
+    Json also = Json::array();
+    for (auto &m : matched)
+        if (m != word)
+            also.push_back(m);
+    if (!also.empty())
+        result["variants"] = also;
     if (result["results"].empty())
         for (auto &base : english_base_forms(word))
         {
-            auto hits = find(base);
+            auto hits = find({base}, nullptr);
             if (!hits.empty())
             {
                 result["word"] = base;
@@ -780,6 +1061,10 @@ std::string Library::article_page(const std::string &id, const std::string &word
             queue.emplace_back(static_cast<uint64_t>(s.integer(0)), static_cast<uint64_t>(s.integer(1)));
     };
     collect(word);
+    // The typed writing's articles come first, then those found under its other writings.
+    for (auto &variant : chinese_variants(word))
+        if (fold_key(variant) != fold_key(word))
+            collect(variant);
     std::set<uint64_t> seen;
     std::string body;
     int articles = 0;

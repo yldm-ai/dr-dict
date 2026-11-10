@@ -1,10 +1,21 @@
 import { $, call, escape, on, toast } from './bridge.ts';
-import { back, currentWord, forward, initArticles, lookup, refresh, renderHome, setWordShownHandler, showHome } from './articles.ts';
+import {
+  back,
+  currentWord,
+  forward,
+  initArticles,
+  lookup,
+  refresh,
+  renderHome,
+  requery,
+  setWordShownHandler,
+  showHome,
+} from './articles.ts';
 import { brandMark, hydrateIcons } from './icons.ts';
 import { addDictionaries, initLibrary, resetLibrary } from './library-panel.ts';
 import { initSettings, openSettings } from './settings-dialog.ts';
 import { Tooltips } from './tooltip.ts';
-import { effectiveTheme, onSystemThemeChange, setSystemDark, state, subscribe } from './state.ts';
+import { activeDictionaries, effectiveTheme, onSystemThemeChange, setSystemDark, state, subscribe } from './state.ts';
 
 // Self-drawn hover tips everywhere, as in DR Reader (native title tooltips never appear).
 const tooltips = new Tooltips();
@@ -34,7 +45,7 @@ function renderList(): void {
     .join('');
   let empty = '';
   if (!items.length) {
-    if (!state.dictionaries.length) empty = '添加词典后即可开始查询';
+    if (!activeDictionaries().length) empty = '添加词典后即可开始查询';
     else if (mode === 'suggest') empty = `没有以“${escape(input.value.trim())}”开头的词条`;
     else empty = '查过的词会出现在这里';
   }
@@ -234,6 +245,13 @@ async function bootstrap(): Promise<void> {
     if (signature !== previous) refresh();
     previous = signature;
   });
+  let previousChinese = '';
+  subscribe('saved', () => {
+    // Simplified/traditional lookup changes what a lookup finds, so ask again.
+    const signature = `${state.settings.chineseConversion}|${state.settings.chineseVariant}`;
+    if (signature !== previousChinese) requery();
+    previousChinese = signature;
+  });
   onSystemThemeChange(() => {
     applyTheme();
     refresh();
@@ -251,12 +269,14 @@ async function bootstrap(): Promise<void> {
     state.settings = { ...state.settings, ...data.settings };
     state.history = data.history;
     state.dataPath = data.dataPath;
+    state.chineseAvailable = Boolean(data.chineseAvailable);
     setSystemDark(Boolean(data.systemDark));
   } catch (error) {
     toast((error as Error).message, 'error');
   }
   applyTheme();
   previous = `${effectiveTheme()}|${state.settings.invertArticles}|${state.settings.articleWidth}`;
+  previousChinese = `${state.settings.chineseConversion}|${state.settings.chineseVariant}`;
   showHome();
   showHistory();
   document.body.classList.add('ready');

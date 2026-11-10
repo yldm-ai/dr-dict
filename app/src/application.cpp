@@ -82,6 +82,8 @@ Application::Application(fs::path root, fs::path assets, std::vector<fs::path> f
     : library_(std::move(root)), assets_(std::move(assets)), initial_files_(std::move(files)),
       shell_override_(std::move(shell))
 {
+    // OpenCC data is installed beside the web assets (bin/<config>/opencc).
+    library_.set_opencc_dir(assets_.parent_path() / "opencc");
 }
 
 void Application::reply(const Json &id, Json result)
@@ -143,19 +145,21 @@ fs::path Application::pick_folder()
     return folder;
 }
 
-void Application::import(const Json &id, std::vector<fs::path> paths)
+void Application::import(const Json &id, std::vector<fs::path> paths, bool rescan)
 {
-    imports_.enqueue([this, id, paths = std::move(paths)] {
+    imports_.enqueue([this, id, paths = std::move(paths), rescan] {
         try
         {
             window_.post([this] { webview_.send({{"event", "import-start"}}); });
-            auto result = library_.add(paths, [this](const Json &progress) {
-                window_.post([this, progress] {
-                    auto event = progress;
+            auto progress = [this](const Json &p) {
+                window_.post([this, p] {
+                    auto event = p;
                     event["event"] = "import-progress";
                     webview_.send(event);
                 });
-            });
+            };
+            // An empty path list with `rescan` scans the remembered folders again.
+            auto result = rescan ? library_.rescan(progress) : library_.add(paths, progress);
             window_.post([this, result] {
                 auto event = result;
                 event["event"] = "import-done";
@@ -197,6 +201,11 @@ void Application::receive(const Json &request)
                 import(id, std::move(paths));
             return;
         }
+        if (method == "dict.rescan")
+        {
+            import(id, {}, true);
+            return;
+        }
         if (method == "open.external")
         {
             auto url = params.at("url").get<std::string>();
@@ -230,7 +239,7 @@ void Application::receive(const Json &request)
         webview_.send({{"id", id}, {"error", e.what()}});
         return;
     }
-    const bool writes_index = method == "dict.remove" || method == "dict.reindex";
+    const bool writes_index = method == "dict.remove" || method == "dict.reindex" || method == "dict.restore";
     auto &worker = writes_index ? imports_ : queries_;
     worker.enqueue([this, id, method, params] {
         try
@@ -245,7 +254,8 @@ void Application::receive(const Json &request)
                           {"dataPath", utf8(library_.root())},
                           // The page always sees prefers-color-scheme: light (see WebView::configure),
                           // so "follow system" takes the Windows theme from here.
-                          {"systemDark", Window::system_dark()}};
+                          {"systemDark", Window::system_dark()},
+                          {"chineseAvailable", library_.chinese_available()}};
                 if (!initial_files_.empty())
                 {
                     auto files = std::move(initial_files_);
@@ -267,6 +277,10 @@ void Application::receive(const Json &request)
                 result = library_.clear_history();
             else if (method == "dict.list")
                 result = library_.list();
+            else if (method == "dict.folders")
+                result = library_.folders();
+            else if (method == "dict.removeFolder")
+                result = library_.remove_folder(params.at("path").get<std::string>());
             else if (method == "dict.update")
                 result = library_.update(params.at("id"), params.at("patch"));
             else if (method == "dict.reorder")
@@ -278,17 +292,21 @@ void Application::receive(const Json &request)
                 library_.remove(params.at("id"));
                 result = library_.list();
             }
-            else if (method == "dict.reindex")
+            else if (method == "dict.reindex" || method == "dict.restore")
             {
                 auto dict_id = params.at("id").get<std::string>();
-                result = library_.reindex(dict_id, [this](const Json &progress) {
-                    window_.post([this, progress] {
-                        auto event = progress;
+                auto progress = [this](const Json &p) {
+                    window_.post([this, p] {
+                        auto event = p;
                         event["event"] = "import-progress";
                         webview_.send(event);
                     });
-                });
+                };
+                result = method == "dict.reindex" ? library_.reindex(dict_id, progress)
+                                                  : library_.restore(dict_id, progress);
             }
+            else if (method == "dict.forget")
+                result = library_.forget(params.at("id").get<std::string>());
             else if (method == "settings.save")
             {
                 result = library_.save_settings(params);

@@ -1,4 +1,5 @@
 #pragma once
+#include "dr/chinese.h"
 #include "dr/dictionary.h"
 #include <map>
 #include <mutex>
@@ -23,6 +24,12 @@ class Library
     Library(const Library &) = delete;
     Library &operator=(const Library &) = delete;
     const fs::path &root() const { return root_; }
+    /** Folder with OpenCC's configs and dictionaries; without it Chinese variant lookup is off. */
+    void set_opencc_dir(const fs::path &dir);
+    /** Whether OpenCC data was found, so the variant settings can work. */
+    bool chinese_available();
+    /** Other writings of `word` that lookups also search, per the current settings. */
+    std::vector<std::string> chinese_variants(const std::string &word);
 
     Json list();
     Json settings();
@@ -32,9 +39,19 @@ class Library
     Json remember(const std::string &word);
     Json clear_history();
 
-    // Files (.mdx/.ifo) or folders scanned recursively.
+    // Files (.mdx/.ifo) or folders scanned recursively. Folders are remembered for rescan().
     Json add(const std::vector<fs::path> &paths, const Progress &progress);
+    // Scans the remembered folders again and adds dictionaries that appeared in them. Removed
+    // dictionaries stay removed; picking one's file again restores it.
+    Json rescan(const Progress &progress);
+    // Remembered folders: [{path, exists}]. Forgetting one keeps the dictionaries found in it.
+    Json folders();
+    Json remove_folder(const std::string &path);
+    // Moves a dictionary to the "removed" group: listed with status "removed", disabled, its
+    // index dropped. restore() indexes it again; forget() drops the entry once its file is gone.
     void remove(const std::string &id);
+    Json restore(const std::string &id, const Progress &progress);
+    Json forget(const std::string &id);
     Json update(const std::string &id, const Json &patch);
     Json reorder(const Json &ids);
     Json reindex(const std::string &id, const Progress &progress);
@@ -58,6 +75,11 @@ class Library
     };
     Json load_entries();
     void save_entries(const Json &list);
+    // sources.json: {"folders": [utf-8 paths]}
+    void drop_index(const std::string &id);
+    Json load_sources();
+    void save_sources(const Json &sources);
+    Json add_paths(const std::vector<fs::path> &paths, const Progress &progress, bool rescan);
     std::shared_ptr<Dictionary> open(const std::string &id);
     Json entry(const std::string &id);
     int number_for(sqlite3 *db, const std::string &id);
@@ -71,6 +93,7 @@ class Library
     std::mutex db_mutex_; // the shared read connection
     sqlite3 *db_ = nullptr;
     std::map<std::string, std::shared_ptr<Dictionary>> open_;
+    std::shared_ptr<ChineseVariants> chinese_;
 };
 
 std::string mime_type(const fs::path &path);

@@ -7,25 +7,45 @@ export type Dictionary = {
   entries: number;
   resources: number;
   hasIcon: boolean;
-  status: 'ready' | 'missing' | 'stale';
+  status: 'ready' | 'missing' | 'stale' | 'removed';
+  // Removed dictionaries stay listed in a collapsed group, disabled and without an index.
+  removed?: boolean;
+  fileMissing?: boolean;
 };
+/** Dictionaries in the library proper (not the removed group). */
+export function activeDictionaries(): Dictionary[] {
+  return state.dictionaries.filter((d) => !d.removed);
+}
 export type Settings = {
   theme: 'light' | 'dark' | 'system';
   shell: 'mica' | 'direct2d';
   invertArticles: boolean;
   articleWidth: 'narrow' | 'comfortable' | 'wide';
+  chineseConversion: boolean;
+  chineseVariant: 't' | 'tw' | 'twp' | 'hk' | 'all';
 };
 export type HistoryItem = { word: string; at: number };
 
 export const state = {
   dictionaries: [] as Dictionary[],
-  settings: { theme: 'system', shell: 'mica', invertArticles: true, articleWidth: 'comfortable' } as Settings,
+  settings: {
+    theme: 'system',
+    shell: 'mica',
+    invertArticles: true,
+    articleWidth: 'comfortable',
+    chineseConversion: false,
+    chineseVariant: 't',
+  } as Settings,
   history: [] as HistoryItem[],
   dataPath: '',
+  // Whether OpenCC's data shipped with the app, so simplified/traditional lookup can work.
+  chineseAvailable: false,
   importing: false,
 };
 
-type Topic = 'dictionaries' | 'settings' | 'history';
+// 'settings' fires for every change, including optimistic ones; 'saved' only once the native
+// side has stored them, which is when lookups see the new values.
+type Topic = 'dictionaries' | 'settings' | 'saved' | 'history';
 const subscribers = new Map<Topic, Set<() => void>>();
 export function subscribe(topic: Topic, handler: () => void): void {
   if (!subscribers.has(topic)) subscribers.set(topic, new Set());

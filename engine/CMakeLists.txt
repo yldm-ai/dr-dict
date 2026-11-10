@@ -1,7 +1,9 @@
 add_library(dr_engine STATIC
   src/paths.cpp src/text.cpp src/compress.cpp src/ripemd128.cpp
-  src/mdict.cpp src/stardict.cpp src/library.cpp)
+  src/mdict.cpp src/stardict.cpp src/library.cpp src/chinese.cpp)
 target_include_directories(dr_engine PUBLIC include)
+target_link_libraries(dr_engine PRIVATE OpenCC::OpenCC)
+add_dependencies(dr_engine dr-opencc-data)
 # Keep miniz from defining zlib-style macros such as adler32 that collide with engine names.
 target_compile_definitions(dr_engine PUBLIC MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
 target_link_libraries(dr_engine PUBLIC nlohmann_json::nlohmann_json PRIVATE miniz dr_sqlite normaliz)

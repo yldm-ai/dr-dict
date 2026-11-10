@@ -246,8 +246,36 @@ int main()
         CHECK(library.reindex(mdx_id, {}).size() == 2);
         CHECK(library.lookup("banana")["results"].size() == 1);
         library.remove(mdx_id);
-        CHECK(library.list().size() == 1);
-        CHECK(library.lookup("banana")["results"].empty());
+        auto after = library.list();
+        CHECK(after.size() == 2); // the removed dictionary is still listed …
+        for (auto &d : after)
+            if (d["id"] == mdx_id)
+                CHECK(d["status"] == "removed" && d["enabled"] == false && d["fileMissing"] == false);
+        CHECK(library.lookup("banana")["results"].empty()); // … but not looked up
+        CHECK(library.suggest("ban", 10).empty());
+        bool rejected = false;
+        try
+        {
+            library.update(mdx_id, {{"enabled", true}});
+        }
+        catch (const std::exception &)
+        {
+            rejected = true;
+        }
+        CHECK(rejected);
+        rejected = false;
+        try
+        {
+            library.forget(mdx_id); // its file still exists
+        }
+        catch (const std::exception &)
+        {
+            rejected = true;
+        }
+        CHECK(rejected);
+        library.restore(mdx_id, {});
+        CHECK(library.lookup("banana")["results"].size() == 1);
+        library.remove(mdx_id);
 
         library.remember("apple");
         library.remember("pear");
@@ -255,6 +283,94 @@ int main()
         CHECK(history.size() == 2 && history[0]["word"] == "apple");
         auto settings = library.save_settings({{"theme", "dark"}, {"shell", "bogus"}});
         CHECK(settings["theme"] == "dark" && settings["shell"] == "mica");
+    }
+
+    // Remembered folders: a rescan picks up new dictionaries; removed ones stay in the removed group.
+    {
+        auto shelf = dicts / "shelf";
+        write_mdict(shelf / "one.mdx", {{"alpha", "<p>a</p>"}}, false, false);
+        Library lib(root / "shelf-data");
+        CHECK(lib.add({shelf}, {})["added"] == 1);
+        CHECK(lib.folders().size() == 1 && lib.folders()[0]["exists"] == true);
+        write_mdict(shelf / "deeper" / "two.mdx", {{"beta", "<p>b</p>"}}, false, false);
+        auto rescanned = lib.rescan({});
+        CHECK(rescanned["added"] == 1 && rescanned["folders"] == 1 && rescanned["errors"].empty());
+        CHECK(lib.lookup("beta")["results"].size() == 1);
+        CHECK(lib.rescan({})["added"] == 0); // nothing new
+
+        std::string two_id;
+        for (auto &d : lib.list())
+            if (d["path"].get<std::string>().find("two.mdx") != std::string::npos)
+                two_id = d["id"];
+        auto removed_count = [&] {
+            int n = 0;
+            for (auto &d : lib.list())
+                n += d["status"] == "removed";
+            return n;
+        };
+        lib.remove(two_id);
+        CHECK(lib.rescan({})["added"] == 0 && removed_count() == 1); // removed stays removed
+        CHECK(lib.add({shelf}, {})["added"] == 0 && removed_count() == 1); // even when its folder is added again
+        CHECK(lib.lookup("beta")["results"].empty());
+        CHECK(lib.add({shelf / "deeper" / "two.mdx"}, {})["added"] == 1); // picking its file restores it
+        CHECK(removed_count() == 0 && lib.lookup("beta")["results"].size() == 1);
+
+        // Once the file of a removed dictionary is gone, its entry can be cleared.
+        lib.remove(two_id);
+        fs::remove_all(shelf / "deeper");
+        CHECK(lib.forget(two_id).size() == 1 && removed_count() == 0);
+        CHECK(lib.list().size() == 1);
+
+        fs::create_directories(shelf / "deeper");
+        lib.add({shelf / "deeper"}, {}); // inside a remembered folder: nothing new to remember
+        CHECK(lib.folders().size() == 1);
+        lib.add({dicts}, {}); // a parent replaces the folders inside it
+        CHECK(lib.folders().size() == 1 && lib.folders()[0]["path"].get<std::string>().find("shelf") == std::string::npos);
+        CHECK(lib.remove_folder(lib.folders()[0]["path"]).empty());
+        CHECK(lib.rescan({})["folders"] == 0);
+    }
+
+    // Simplified/traditional lookups through OpenCC, whose data the build copies beside this binary.
+    {
+        char exe[MAX_PATH];
+        GetModuleFileNameA(nullptr, exe, MAX_PATH);
+        auto opencc = fs::path(exe).parent_path() / "opencc";
+        auto has = [](const std::vector<std::string> &list, const std::string &value) {
+            return std::find(list.begin(), list.end(), value) != list.end();
+        };
+        ChineseVariants cc(opencc);
+        CHECK(cc.available());
+        CHECK(has(cc.expand("软件", "t"), "軟件") && !has(cc.expand("软件", "t"), "軟體"));
+        CHECK(has(cc.expand("软件", "twp"), "軟體"));
+        CHECK(has(cc.expand("软件", "all"), "軟件") && has(cc.expand("软件", "all"), "軟體"));
+        CHECK(has(cc.expand("軟體", "all"), "软件")); // traditional input reaches simplified too
+        CHECK(has(cc.expand("里面", "t"), "裏面") && has(cc.expand("里面", "tw"), "裡面"));
+        CHECK(cc.expand("apple", "all").empty() && cc.expand("软件", "bogus").empty());
+        CHECK(has_han("A 字") && !has_han("abc") && !has_han("かな"));
+
+        // A dictionary written only in Taiwan forms.
+        write_mdict(dicts / "zh" / "zh.mdx", {{"軟體", "<p>software</p>"}, {"裏面", "<p>inside</p>"}}, false, false);
+        Library zh(root / "zh-data");
+        zh.set_opencc_dir(opencc);
+        CHECK(zh.chinese_available());
+        CHECK(zh.add({dicts / "zh" / "zh.mdx"}, {})["added"] == 1);
+        CHECK(zh.lookup("软件")["results"].empty()); // off by default
+        zh.save_settings({{"chineseConversion", true}, {"chineseVariant", "tw"}});
+        CHECK(zh.lookup("软件")["results"].empty()); // Taiwan characters alone give 軟件
+        CHECK(zh.save_settings({{"chineseVariant", "bogus"}})["chineseVariant"] == "tw");
+        zh.save_settings({{"chineseVariant", "twp"}});
+        auto hit = zh.lookup("软件");
+        CHECK(hit["results"].size() == 1 && hit["variants"] == Json::array({"軟體"}));
+        if (!hit["results"].empty())
+        {
+            auto zh_id = hit["results"][0]["id"].get<std::string>();
+            CHECK(zh.article_page(zh_id, "软件", "light").find("software") != std::string::npos);
+        }
+        zh.save_settings({{"chineseVariant", "t"}});
+        CHECK(zh.lookup("里面")["results"].size() == 1);
+        zh.save_settings({{"chineseVariant", "all"}});
+        auto suggestions = zh.suggest("软", 10);
+        CHECK(std::find(suggestions.begin(), suggestions.end(), "軟體") != suggestions.end());
     }
     fs::remove_all(root);
     if (failures)
