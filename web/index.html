@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://dict.dr-dict.local data:; frame-src https://dict.dr-dict.local; connect-src 'self'; object-src 'none'"
+    />
+    <link rel="icon" href="data:," />
+    <title>DR Dict</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">DR Dict</span>
+        </div>
+        <div class="search">
+          <span class="search-icon" data-icon="search" aria-hidden="true"></span>
+          <input
+            id="search"
+            type="search"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="查找单词"
+            aria-label="查找单词"
+            aria-controls="word-list"
+          />
+          <button id="search-clear" class="search-clear" type="button" aria-label="清空" hidden>
+            <span data-icon="x"></span>
+          </button>
+          <kbd class="search-hint">Ctrl K</kbd>
+        </div>
+        <div class="side-label" id="list-label">最近查询</div>
+        <ul id="word-list" class="word-list" role="listbox" aria-labelledby="list-label"></ul>
+        <div id="list-empty" class="list-empty" hidden></div>
+        <div class="sidebar-footer">
+          <button id="open-library" class="side-button" type="button">
+            <span data-icon="library"></span><span>词典库</span><span id="library-count" class="count">0</span>
+          </button>
+          <button id="open-settings" class="side-button icon-only" type="button" aria-label="设置" title="设置">
+            <span data-icon="settings"></span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="nav-buttons">
+            <button id="back" class="icon-button" type="button" aria-label="后退" title="后退 (Alt ←)" disabled>
+              <span data-icon="arrow-left"></span>
+            </button>
+            <button id="forward" class="icon-button" type="button" aria-label="前进" title="前进 (Alt →)" disabled>
+              <span data-icon="arrow-right"></span>
+            </button>
+          </div>
+          <nav id="jump" class="jump" aria-label="跳转到词典"></nav>
+        </header>
+        <div id="content" class="content">
+          <section id="home" class="home"></section>
+          <section id="results" class="results" hidden></section>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="library-dialog" class="dialog library-dialog" aria-labelledby="library-title">
+      <header class="dialog-header">
+        <div>
+          <h2 id="library-title">词典库</h2>
+          <p class="dialog-subtitle">词典文件保留在原位置，DR Dict 只为它们建立索引。</p>
+        </div>
+        <button class="icon-button" type="button" data-close aria-label="关闭"><span data-icon="x"></span></button>
+      </header>
+      <div class="dialog-toolbar">
+        <button id="add-files" class="button primary" type="button"><span data-icon="plus"></span>添加词典</button>
+        <button id="add-folder" class="button" type="button"><span data-icon="folder"></span>添加文件夹</button>
+        <span class="toolbar-note">支持 MDict（.mdx + .mdd）与 StarDict（.ifo）</span>
+      </div>
+      <div id="import-progress" class="import-progress" hidden>
+        <div class="import-text"><span id="import-name">正在准备…</span><span id="import-percent"></span></div>
+        <div class="bar"><span id="import-bar"></span></div>
+      </div>
+      <ul id="dict-list" class="dict-list"></ul>
+      <div id="dict-about" class="dict-about" hidden>
+        <button id="about-back" class="button ghost" type="button"><span data-icon="arrow-left"></span>返回词典库</button>
+        <div id="about-meta" class="about-meta"></div>
+        <iframe id="about-frame" class="about-frame" title="词典简介" sandbox="allow-same-origin"></iframe>
+      </div>
+    </dialog>
+
+    <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">
+      <header class="dialog-header">
+        <h2 id="settings-title">设置</h2>
+        <button class="icon-button" type="button" data-close aria-label="关闭"><span data-icon="x"></span></button>
+      </header>
+      <div class="settings">
+        <div class="settings-group">外观</div>
+        <div class="setting">
+          <div><div class="setting-name">主题</div></div>
+          <div class="segmented" data-setting="theme">
+            <button type="button" data-value="light">浅色</button>
+            <button type="button" data-value="dark">深色</button>
+            <button type="button" data-value="system">跟随系统</button>
+          </div>
+        </div>
+        <div class="setting">
+          <div>
+            <div class="setting-name">窗口样式</div>
+            <div class="setting-note">Mica 使用系统标题栏与材质背景</div>
+          </div>
+          <div class="segmented" data-setting="shell">
+            <button type="button" data-value="mica">Mica</button>
+            <button type="button" data-value="direct2d">简洁</button>
+          </div>
+        </div>
+        <div class="settings-group">词条</div>
+        <div class="setting">
+          <div><div class="setting-name">正文宽度</div></div>
+          <div class="segmented" data-setting="articleWidth">
+            <button type="button" data-value="narrow">窄</button>
+            <button type="button" data-value="comfortable">适中</button>
+            <button type="button" data-value="wide">宽</button>
+          </div>
+        </div>
+        <div class="setting">
+          <div>
+            <div class="setting-name">深色模式下反色显示词条</div>
+            <div class="setting-note">关闭后，词条在深色模式中保持原有的浅色纸面</div>
+          </div>
+          <label class="switch"><input id="invert-articles" type="checkbox" /><span></span></label>
+        </div>
+        <div class="settings-group">数据</div>
+        <div class="setting">
+          <div>
+            <div class="setting-name">查询历史</div>
+            <div class="setting-note">只保存在本机</div>
+          </div>
+          <button id="clear-history" class="button" type="button">清除历史</button>
+        </div>
+        <div class="setting stacked">
+          <div class="setting-name">数据位置</div>
+          <code id="data-path" class="data-path"></code>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" popover="manual" role="status"></div>
+    <div id="caption-tip" class="caption-tip" hidden></div>
+  </body>
+</html>

@@ -1,0 +1,121 @@
+// Loaded into every dictionary article frame (https://dict.dr-dict.local/<id>/@article).
+// It reports the document height to the app, and turns MDict/StarDict link schemes into app
+// actions: entry:// and bword:// look words up, sound:// plays audio, web links open outside.
+(() => {
+  const parentOrigin = 'https://app.dr-dict.local';
+  const embedded = window.parent !== window;
+  const post = (message) => {
+    if (embedded) window.parent.postMessage({ source: 'dr-frame', ...message }, parentOrigin);
+  };
+  document.documentElement.classList.toggle('dr-embedded', embedded);
+
+  let lastHeight = -1;
+  let scheduled = false;
+  const measure = () => {
+    scheduled = false;
+    const root = document.documentElement;
+    const body = document.body;
+    const height = Math.max(root.scrollHeight, body ? body.scrollHeight : 0, root.getBoundingClientRect().height);
+    if (Math.abs(height - lastHeight) >= 1) {
+      lastHeight = height;
+      post({ type: 'height', height });
+    }
+  };
+  const schedule = () => {
+    if (!scheduled) {
+      scheduled = true;
+      requestAnimationFrame(measure);
+    }
+  };
+  const observer = new ResizeObserver(schedule);
+  document.addEventListener('DOMContentLoaded', () => {
+    observer.observe(document.documentElement);
+    if (document.body) observer.observe(document.body);
+    new MutationObserver(schedule).observe(document.body, { subtree: true, childList: true, attributes: true });
+    schedule();
+  });
+  window.addEventListener('load', schedule);
+  // Images and fonts that finish late change the height without a DOM mutation.
+  document.addEventListener('load', schedule, true);
+
+  let audio = null;
+  const play = (path) => {
+    if (audio) audio.pause();
+    audio = new Audio(new URL(path.replace(/\\/g, '/').replace(/^\/+/, ''), location.href).href);
+    audio.play().catch(() => {});
+  };
+  const scrollToAnchor = (name) => {
+    const id = decodeURIComponent(name);
+    const target = document.getElementById(id) || document.getElementsByName(id)[0];
+    if (!target) return;
+    const top = target.getBoundingClientRect().top + window.scrollY;
+    if (embedded) post({ type: 'scroll', top });
+    else target.scrollIntoView();
+  };
+  const decode = (text) => {
+    try {
+      return decodeURIComponent(text);
+    } catch {
+      return text;
+    }
+  };
+
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (event.button !== 0 || event.defaultPrevented) return;
+      const link = event.target instanceof Element ? event.target.closest('a[href], area[href]') : null;
+      if (!link) return;
+      const href = (link.getAttribute('href') || '').trim();
+      const lower = href.toLowerCase();
+      const handled = () => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      if (lower.startsWith('sound://')) {
+        handled();
+        play(href.slice(8));
+      } else if (lower.startsWith('entry://') || lower.startsWith('bword://')) {
+        handled();
+        const target = href.slice(8);
+        if (target.startsWith('#')) scrollToAnchor(target.slice(1));
+        else if (target) post({ type: 'lookup', word: decode(target.split('#')[0]) });
+      } else if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:')) {
+        handled();
+        post({ type: 'open', url: href });
+      } else if (href.startsWith('#')) {
+        event.preventDefault();
+        if (href.length > 1) scrollToAnchor(href.slice(1));
+      } else if (lower.startsWith('javascript:') || href === '') {
+        // Leave script links to the dictionary's own handlers.
+      } else {
+        // A relative link inside an article names another headword (or a resource file).
+        handled();
+        if (!/\.(html?|css|js|png|jpe?g|gif|svg|webp|mp3|wav|ogg|spx|mp4)$/i.test(href))
+          post({ type: 'lookup', word: decode(href.split('#')[0]) });
+      }
+    },
+    true,
+  );
+
+  document.addEventListener('dblclick', (event) => {
+    if (event.target instanceof Element && event.target.closest('a, button, input, textarea')) return;
+    const text = String(window.getSelection() || '').trim();
+    if (text && text.length <= 64 && !/[\r\n]/.test(text)) post({ type: 'lookup', word: text });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    const editable = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]');
+    if (event.altKey && event.key === 'ArrowLeft') post({ type: 'key', key: 'back' });
+    else if (event.altKey && event.key === 'ArrowRight') post({ type: 'key', key: 'forward' });
+    else if (event.ctrlKey && ['k', 'l', 'f'].includes(event.key.toLowerCase())) post({ type: 'key', key: 'search' });
+    else if (!editable && !event.ctrlKey && !event.altKey && !event.metaKey && event.key.length === 1 && event.key.trim())
+      post({ type: 'key', key: event.key });
+    else return;
+    event.preventDefault();
+  });
+  window.addEventListener('mouseup', (event) => {
+    if (event.button === 3) post({ type: 'key', key: 'back' });
+    if (event.button === 4) post({ type: 'key', key: 'forward' });
+  });
+})();

@@ -1,0 +1,44 @@
+/* Baseline for dictionary article frames. Dictionary stylesheets load after this file and win. */
+html { color-scheme: light; }
+html.dr-embedded, html.dr-embedded body { overflow: hidden; }
+body {
+  margin: 0;
+  padding: 2px 2px 8px;
+  color: #37352f;
+  background: transparent;
+  font: 15px/1.65 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+img, video { max-width: 100%; height: auto; }
+table { max-width: 100%; }
+a { color: #2b6f62; }
+a[href^='sound://'], .sd-sound { cursor: pointer; text-decoration: none; }
+::selection { background: #2b6f6233; }
+.dr-separator { border: 0; border-top: 1px dashed #e3e3e0; margin: 20px 0; }
+.dr-empty { color: #787774; margin: 4px 0; }
+.dr-about { padding: 14px 16px; }
+html:not(.dr-embedded) body { padding: 0; }
+
+/* StarDict and XDXF fields. */
+.sd-t { color: #787774; margin-bottom: 4px; }
+.sd-m { white-space: normal; }
+.sd-binary { color: #a8a7a2; font-size: 13px; }
+.xdxf-k { font-weight: 600; }
+.xdxf-tr { color: #787774; }
+.xdxf-abr, .xdxf-pos { color: #2b6f62; font-style: italic; }
+.xdxf-ex { color: #5f5e5a; font-style: italic; }
+.xdxf-co { color: #787774; }
+
+/* The dark article theme inverts the page and re-inverts media to keep photos natural. */
+html[data-dr-theme='dark'] {
+  background: #fff;
+  filter: invert(0.9) hue-rotate(180deg);
+}
+html[data-dr-theme='dark'] img,
+html[data-dr-theme='dark'] video,
+html[data-dr-theme='dark'] picture,
+html[data-dr-theme='dark'] canvas,
+html[data-dr-theme='dark'] [style*='background-image'] {
+  filter: invert(1) hue-rotate(180deg);
+}

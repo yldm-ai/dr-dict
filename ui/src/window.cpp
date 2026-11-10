@@ -1,0 +1,670 @@
+#include "dr/window.h"
+#include <algorithm>
+#include <dwmapi.h>
+#include <windowsx.h>
+namespace dr
+{
+namespace
+{
+constexpr UINT dispatch = WM_APP + 1;
+constexpr UINT_PTR caption_tip_timer = 43;
+}
+int Window::scale(int x) const
+{
+    return MulDiv(x, GetDpiForWindow(hwnd_), 96);
+}
+int Window::caption_height() const
+{
+    const auto dpi=GetDpiForWindow(hwnd_);
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame,WS_OVERLAPPEDWINDOW,FALSE,0,dpi);
+    const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
+    return -frame.top-(IsZoomed(hwnd_)?resize:0);
+}
+bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio)
+{
+    width_ratio_ = width_ratio;
+    height_ratio_ = height_ratio;
+    style_ = style;
+    icon_resource_ = icon_resource;
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.hInstance = instance;
+    wc.lpfnWndProc = procedure;
+    wc.lpszClassName = L"DRDict.NativeShell";
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(icon_resource_));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(icon_resource_), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+    RegisterClassExW(&wc);
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    MONITORINFO monitor{sizeof(monitor)};
+    if (!GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &monitor))
+    {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &monitor.rcWork, 0);
+        monitor.rcMonitor = monitor.rcWork;
+    }
+    const RECT &work = monitor.rcWork;
+    const int width = std::min<int>(static_cast<int>((monitor.rcMonitor.right - monitor.rcMonitor.left) * width_ratio_),
+                               work.right - work.left);
+    const int height = std::min<int>(static_cast<int>((monitor.rcMonitor.bottom - monitor.rcMonitor.top) * height_ratio_),
+                                work.bottom - work.top);
+    hwnd_ = CreateWindowExW(0, wc.lpszClassName, title_.c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                            work.left + (work.right - work.left - width) / 2,
+                            work.top + (work.bottom - work.top - height) / 2, width, height, nullptr, nullptr,
+                            instance, this);
+    if (!hwnd_)
+        return false;
+    update_icons();
+    apply_frame();
+    ShowWindow(hwnd_, SW_SHOW);
+    UpdateWindow(hwnd_);
+    return true;
+}
+void Window::update_icons()
+{
+    const auto dpi = GetDpiForWindow(hwnd_);
+    const auto instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
+    // Own DPI-specific window icons; class icons remain shared system resources.
+    for (const auto size : {ICON_SMALL, ICON_BIG})
+    {
+        const bool is_small = size == ICON_SMALL;
+        const auto icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(icon_resource_), IMAGE_ICON,
+            GetSystemMetricsForDpi(is_small ? SM_CXSMICON : SM_CXICON, dpi),
+            GetSystemMetricsForDpi(is_small ? SM_CYSMICON : SM_CYICON, dpi), LR_DEFAULTCOLOR));
+        if (icon)
+        {
+            SendMessageW(hwnd_, WM_SETICON, size, reinterpret_cast<LPARAM>(icon));
+            auto &previous = is_small ? small_icon_ : large_icon_;
+            if (previous)
+                DestroyIcon(previous);
+            previous = icon;
+        }
+    }
+}
+RECT Window::content_bounds() const
+{
+    RECT r{};
+    GetClientRect(hwnd_, &r);
+    if (draws_caption())
+        r.top = caption_height();
+    return r;
+}
+RECT Window::screen_content() const
+{
+    RECT r = content_bounds();
+    MapWindowPoints(hwnd_, nullptr, reinterpret_cast<POINT *>(&r), 2);
+    return r;
+}
+void Window::set_title(const std::wstring &title)
+{
+    title_ = title;
+    SetWindowTextW(hwnd_, title.c_str());
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+void Window::set_style(ShellStyle style)
+{
+    if(style_==style)return;
+    caption_tip(HTNOWHERE);
+    style_ = style;
+    target_.Reset();
+    apply_frame();
+    if (on_resize)
+        on_resize();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
+void Window::set_theme(const std::string &theme)
+{
+    follow_system_theme_ = theme == "system";
+    DWORD light = 1, size = sizeof(light);
+    if (follow_system_theme_)
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size);
+    // Match the web application's --sidebar, --text and --hover in styles.css.
+    const bool dark = theme == "dark" || (follow_system_theme_ && light == 0);
+    caption_background_ = dark ? 0x1b1b1a : 0xfbfbfa;
+    caption_text_ = dark ? 0xe6e6e4 : 0x37352f;
+    caption_hover_ = dark ? 0x2a2a29 : 0xefefed;
+    BOOL value = dark;
+    DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+void Window::set_fullscreen(bool enabled)
+{
+    if (fullscreen_ == enabled) return;
+    caption_tip(HTNOWHERE);
+    if (enabled)
+    {
+        windowed_placement_.length = sizeof(WINDOWPLACEMENT);
+        GetWindowPlacement(hwnd_, &windowed_placement_);
+        windowed_style_ = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor);
+        fullscreen_ = true;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, windowed_style_ & ~WS_OVERLAPPEDWINDOW);
+        apply_frame();
+        SetWindowPos(hwnd_, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+                     monitor.rcMonitor.right - monitor.rcMonitor.left,
+                     monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    }
+    else
+    {
+        fullscreen_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, windowed_style_);
+        apply_frame();
+        SetWindowPlacement(hwnd_, &windowed_placement_);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+    target_.Reset();
+    if (on_resize) on_resize();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
+void Window::set_borderless(bool enabled)
+{
+    if (borderless_ == enabled) return;
+    caption_tip(HTNOWHERE);
+    // The page stays in place; the title bar is added or removed around it.
+    const RECT before = screen_content();
+    RECT window{};
+    GetWindowRect(hwnd_, &window);
+    borderless_ = enabled;
+    target_.Reset();
+    apply_frame();
+    // Maximized and fullscreen windows keep filling their monitor.
+    if (!fullscreen_ && !IsZoomed(hwnd_))
+    {
+        const RECT after = screen_content();
+        window.left += before.left - after.left;
+        window.top += before.top - after.top;
+        window.right += before.right - after.right;
+        window.bottom += before.bottom - after.bottom;
+        // Keep a returning title bar on screen.
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (!enabled && GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor) &&
+            window.top < monitor.rcWork.top)
+            OffsetRect(&window, 0, monitor.rcWork.top - window.top);
+        SetWindowPos(hwnd_, nullptr, window.left, window.top, window.right - window.left,
+                     window.bottom - window.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    if (on_resize) on_resize();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
+void Window::apply_frame()
+{
+    DWORD backdrop = style_ == ShellStyle::Mica && !fullscreen_ ? 2 : 1;
+    mica_available_ = SUCCEEDED(DwmSetWindowAttribute(hwnd_, 38, &backdrop, sizeof(backdrop))) &&
+                      style_ == ShellStyle::Mica && !fullscreen_;
+    DWORD corners = fullscreen_ ? 1 : 2;
+    DwmSetWindowAttribute(hwnd_, 33, &corners, sizeof(corners));
+    MARGINS margins{0, 0, style_ == ShellStyle::Mica && !fullscreen_ && !borderless_ ? 1 : 0, 0};
+    DwmExtendFrameIntoClientArea(hwnd_, &margins);
+    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+}
+void Window::post(std::function<void()> fn)
+{
+    {
+        std::lock_guard lock(mutex_);
+        pending_.push_back(std::move(fn));
+    }
+    PostMessageW(hwnd_, dispatch, 0, 0);
+}
+// As in the MSIME settings window (TitleBar::HitTestCaption), minimize and close are reported
+// as client area and tracked here: the system shows its own "Minimize"/"Close" tooltips for
+// HTMINBUTTON and HTCLOSE. Only maximize stays HTMAXBUTTON so Windows 11 offers Snap Layouts.
+static bool client_caption_button(int hit)
+{
+    return hit == HTMINBUTTON || hit == HTCLOSE;
+}
+int Window::caption_hit(POINT p) const
+{
+    RECT r{};
+    GetClientRect(hwnd_, &r);
+    if (p.y < 0 || p.y >= caption_height())
+        return HTCLIENT;
+    int w = scale(46);
+    if (p.x >= r.right - w)
+        return HTCLOSE;
+    if (p.x >= r.right - w * 2)
+        return HTMAXBUTTON;
+    if (p.x >= r.right - w * 3)
+        return HTMINBUTTON;
+    return HTCAPTION;
+}
+RECT Window::caption_button(int hit) const
+{
+    RECT r{};
+    GetClientRect(hwnd_, &r);
+    const int w = scale(46), slot = hit == HTCLOSE ? 1 : hit == HTMAXBUTTON ? 2 : 3;
+    return {r.right - w * slot, 0, r.right - w * (slot - 1), caption_height()};
+}
+// As in the MSIME settings window, a caption button's tip waits 500 ms under a still pointer
+// and goes away as soon as the pointer moves to another part of the caption or presses.
+void Window::caption_tip(int hit)
+{
+    const int button = hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTCLOSE ? hit : HTNOWHERE;
+    if (button == tip_)
+        return;
+    tip_ = button;
+    KillTimer(hwnd_, caption_tip_timer);
+    if (on_caption_tooltip)
+        on_caption_tooltip(L"", RECT{});
+    if (button != HTNOWHERE)
+        SetTimer(hwnd_, caption_tip_timer, 500, nullptr);
+}
+void Window::paint()
+{
+    PAINTSTRUCT ps{};
+    BeginPaint(hwnd_, &ps);
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    if (draws_caption() && rc.right > 0 && rc.bottom > 0)
+    {
+        if (!factory_)
+            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
+        if (!write_)
+            DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                reinterpret_cast<IUnknown **>(write_.GetAddressOf()));
+        if (write_ && !text_)
+        {
+            const wchar_t *family = L"Segoe UI";
+            Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
+            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)))
+            {
+                for (const auto candidate : {L"Microsoft YaHei", L"Microsoft YaHei UI", L"Noto Sans SC",
+                                             L"Noto Sans CJK SC", L"Segoe UI"})
+                {
+                    UINT32 index = 0;
+                    BOOL exists = FALSE;
+                    if (SUCCEEDED(fonts->FindFamilyName(candidate, &index, &exists)) && exists)
+                    {
+                        family = candidate;
+                        break;
+                    }
+                }
+            }
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12, L"zh-CN",
+                                     &text_);
+            if (text_)
+            {
+                text_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                // Long titles end in an ellipsis before the caption buttons instead of being cut.
+                text_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                Microsoft::WRL::ComPtr<IDWriteInlineObject> ellipsis;
+                if (SUCCEEDED(write_->CreateEllipsisTrimmingSign(text_.Get(), &ellipsis)))
+                {
+                    const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+                    text_->SetTrimming(&trimming, ellipsis.Get());
+                }
+            }
+        }
+        if (write_ && !caption_icons_)
+        {
+            Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
+            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)))
+                for (const auto *name : {L"Segoe Fluent Icons", L"Segoe MDL2 Assets"})
+                {
+                    UINT32 index = 0;
+                    BOOL exists = FALSE;
+                    Microsoft::WRL::ComPtr<IDWriteFontFamily> family;
+                    Microsoft::WRL::ComPtr<IDWriteFont> font;
+                    Microsoft::WRL::ComPtr<IDWriteFontFace> face;
+                    const UINT32 codes[] = {0xe921, 0xe922, 0xe923, 0xe8bb};
+                    UINT16 glyphs[4] = {};
+                    if (FAILED(fonts->FindFamilyName(name, &index, &exists)) || !exists ||
+                        FAILED(fonts->GetFontFamily(index, &family)) ||
+                        FAILED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                            DWRITE_FONT_STYLE_NORMAL, &font)) || FAILED(font->CreateFontFace(&face)) ||
+                        FAILED(face->GetGlyphIndices(codes, 4, glyphs)) ||
+                        std::any_of(std::begin(glyphs), std::end(glyphs), [](UINT16 glyph) { return glyph == 0; })) continue;
+                    if (SUCCEEDED(write_->CreateTextFormat(name, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10, L"en-US", &caption_icons_))) break;
+                }
+            if (caption_icons_)
+            {
+                caption_icons_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                caption_icons_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                caption_icons_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            }
+        }
+        if (factory_ && !target_)
+            factory_->CreateHwndRenderTarget(
+                D2D1::RenderTargetProperties(),
+                D2D1::HwndRenderTargetProperties(hwnd_, D2D1::SizeU(rc.right, rc.bottom)), &target_);
+        if (target_)
+        {
+            target_->SetDpi(float(GetDpiForWindow(hwnd_)), float(GetDpiForWindow(hwnd_)));
+            auto size = target_->GetSize();
+            const float height=caption_height()*96.0f/GetDpiForWindow(hwnd_);
+            target_->BeginDraw();
+            Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
+            target_->CreateSolidColorBrush(D2D1::ColorF(caption_background_), &brush);
+            if (brush)
+            {
+                target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
+                brush->SetColor(D2D1::ColorF(caption_text_));
+                if (text_)
+                    target_->DrawTextW(title_.c_str(), static_cast<UINT32>(title_.size()), text_.Get(),
+                                       D2D1::RectF(10, 0, std::max(10.f, size.width - 150), height), brush.Get(),
+                                       D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                for (int i = 0; i < 3; ++i)
+                {
+                    int hit = i == 0 ? HTMINBUTTON : i == 1 ? HTMAXBUTTON : HTCLOSE;
+                    float x = size.width - 46 * (3 - i);
+                    if (hot_ == hit)
+                    {
+                        brush->SetColor(D2D1::ColorF(hit == HTCLOSE ? 0xc42b1c : caption_hover_));
+                        target_->FillRectangle(D2D1::RectF(x, 0, x + 46, height), brush.Get());
+                    }
+                    brush->SetColor(D2D1::ColorF(
+                        hot_ == HTCLOSE && hit == HTCLOSE ? 0xffffff : caption_text_));
+                    // Segoe Fluent Icons: ChromeMinimize, ChromeMaximize/Restore, ChromeClose.
+                    const wchar_t glyph = i == 0 ? L'\uE921'
+                                          : i == 1 ? (IsZoomed(hwnd_) ? L'\uE923' : L'\uE922')
+                                                   : L'\uE8BB';
+                    if (caption_icons_)
+                        target_->DrawTextW(&glyph, 1, caption_icons_.Get(),
+                                           D2D1::RectF(x, 0, x + 46, height), brush.Get(),
+                                           D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    else
+                    {
+                        // Font-free last resort: caption controls must remain visible and usable.
+                        const float cx = x + 23, cy = height / 2;
+                        if (i == 0)
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy), D2D1::Point2F(cx + 5, cy), brush.Get());
+                        else if (i == 2)
+                        {
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy - 5), D2D1::Point2F(cx + 5, cy + 5), brush.Get());
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy + 5), D2D1::Point2F(cx + 5, cy - 5), brush.Get());
+                        }
+                        else if (IsZoomed(hwnd_))
+                        {
+                            target_->DrawRectangle(D2D1::RectF(cx - 3, cy - 5, cx + 5, cy + 3), brush.Get());
+                            brush->SetColor(D2D1::ColorF(hot_ == hit ? caption_hover_ : caption_background_));
+                            target_->FillRectangle(D2D1::RectF(cx - 5, cy - 3, cx + 3, cy + 5), brush.Get());
+                            brush->SetColor(D2D1::ColorF(caption_text_));
+                            target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 3, cx + 3, cy + 5), brush.Get());
+                        }
+                        else target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 5, cx + 5, cy + 5), brush.Get());
+                    }
+                }
+            }
+            if (target_->EndDraw() == D2DERR_RECREATE_TARGET)
+                target_.Reset();
+        }
+    }
+    EndPaint(hwnd_, &ps);
+}
+LRESULT CALLBACK Window::procedure(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    auto self = reinterpret_cast<Window *>(GetWindowLongPtrW(h, GWLP_USERDATA));
+    if (m == WM_NCCREATE)
+    {
+        self = static_cast<Window *>(reinterpret_cast<CREATESTRUCTW *>(l)->lpCreateParams);
+        self->hwnd_ = h;
+        SetWindowLongPtrW(h, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    return self ? self->message(m, w, l) : DefWindowProcW(h, m, w, l);
+}
+LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
+{
+    if (m == dispatch)
+    {
+        std::vector<std::function<void()>> work;
+        {
+            std::lock_guard lock(mutex_);
+            work.swap(pending_);
+        }
+        for (auto &fn : work)
+            fn();
+        return 0;
+    }
+    switch (m)
+    {
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+        if (follow_system_theme_) set_theme("system");
+        break;
+    case WM_SYSKEYDOWN:
+        if (w == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
+        {
+            if (!(l & (1LL << 30)) && on_toggle_borderless) on_toggle_borderless();
+            return 0;
+        }
+        break;
+    case WM_NCCALCSIZE:
+        if (fullscreen_) return 0;
+        // The Direct2D caption and a hidden title bar both keep the invisible side and bottom
+        // resize borders while the caption height becomes client area.
+        if (w && (style_ == ShellStyle::Direct2D || borderless_))
+        {
+            auto p = reinterpret_cast<NCCALCSIZE_PARAMS *>(l);
+            auto top = p->rgrc[0].top;
+            auto result = DefWindowProcW(hwnd_, m, w, l);
+            p->rgrc[0].top =
+                top + (IsZoomed(hwnd_)
+                           ? GetSystemMetricsForDpi(SM_CYFRAME, GetDpiForWindow(hwnd_)) +
+                                 GetSystemMetricsForDpi(SM_CXPADDEDBORDER, GetDpiForWindow(hwnd_))
+                           : 0);
+            return result;
+        }
+        break;
+    case WM_NCHITTEST:
+        if (fullscreen_) return HTCLIENT;
+        break;
+    case WM_PAINT:
+        paint();
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_CLOSE:
+        if (on_close)
+        {
+            on_close();
+            SetTimer(hwnd_, 42, 1800, nullptr);
+            return 0;
+        }
+        break;
+    case WM_TIMER:
+        if (w == 42)
+        {
+            DestroyWindow(hwnd_);
+            return 0;
+        }
+        if (w == caption_tip_timer)
+        {
+            KillTimer(hwnd_, caption_tip_timer);
+            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && draws_caption() && on_caption_tooltip)
+                on_caption_tooltip(tip_ == HTMINBUTTON   ? L"最小化"
+                                   : tip_ == HTCLOSE     ? L"关闭"
+                                   : IsZoomed(hwnd_)     ? L"向下还原"
+                                                         : L"最大化",
+                                   caption_button(tip_));
+            return 0;
+        }
+        break;
+    case WM_GETMINMAXINFO:
+    {
+        auto info = reinterpret_cast<MINMAXINFO *>(l);
+        MONITORINFO monitor{sizeof(monitor)};
+        info->ptMinTrackSize = {scale(780), scale(540)};
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor))
+        {
+            // High DPI or a small screen must not force the initial window above its screen fraction.
+            info->ptMinTrackSize.x = std::min<LONG>(info->ptMinTrackSize.x,
+                std::min<int>(static_cast<int>((monitor.rcMonitor.right - monitor.rcMonitor.left) * width_ratio_),
+                         monitor.rcWork.right - monitor.rcWork.left));
+            info->ptMinTrackSize.y = std::min<LONG>(info->ptMinTrackSize.y,
+                std::min<int>(static_cast<int>((monitor.rcMonitor.bottom - monitor.rcMonitor.top) * height_ratio_),
+                         monitor.rcWork.bottom - monitor.rcWork.top));
+        }
+        return 0;
+    }
+    case WM_DPICHANGED:
+    {
+        update_icons();
+        auto r = reinterpret_cast<RECT *>(l);
+        SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER);
+        if (on_resize)
+            on_resize();
+        return 0;
+    }
+    case WM_SIZE:
+    {
+        if (target_)
+            target_->Resize(D2D1::SizeU(LOWORD(l), HIWORD(l)));
+        if (on_resize)
+            on_resize();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
+    case WM_MOUSEACTIVATE:
+        // A left click into an inactive client area only activates the window.
+        // Eat its button-down before WebView2 can interpret it as a page tap.
+        // Keyboard activation and native caption controls keep their usual behavior.
+        if (LOWORD(l) == HTCLIENT && HIWORD(l) == WM_LBUTTONDOWN && GetForegroundWindow() != hwnd_)
+        {
+            POINT p{};
+            GetCursorPos(&p);
+            ScreenToClient(hwnd_, &p);
+            if (!(draws_caption() && client_caption_button(caption_hit(p))))
+                return MA_ACTIVATEANDEAT;
+        }
+        break;
+    case WM_ACTIVATE:
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        break;
+    case WM_DESTROY:
+        if (small_icon_)
+            DestroyIcon(small_icon_);
+        if (large_icon_)
+            DestroyIcon(large_icon_);
+        small_icon_ = large_icon_ = nullptr;
+        PostQuitMessage(0);
+        return 0;
+    }
+    if (draws_caption())
+    {
+        switch (m)
+        {
+        case WM_NCHITTEST:
+        {
+            auto result = DefWindowProcW(hwnd_, m, w, l);
+            if (result != HTCLIENT)
+                return result;
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            ScreenToClient(hwnd_, &p);
+            if (!IsZoomed(hwnd_) && p.y < scale(6))
+                return HTTOP;
+            const auto hit = caption_hit(p);
+            return client_caption_button(hit) ? HTCLIENT : hit;
+        }
+        case WM_NCMOUSEMOVE:
+        {
+            hot_ = static_cast<int>(w);
+            if (pressed_ == HTNOWHERE)
+                caption_tip(hot_);
+            TRACKMOUSEEVENT t{sizeof(t), TME_NONCLIENT | TME_LEAVE, hwnd_, 0};
+            TrackMouseEvent(&t);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            if (hot_ == HTMAXBUTTON)
+                break;
+            return 0;
+        }
+        case WM_NCMOUSELEAVE:
+            // Leaving maximize for minimize arrives after that button's WM_MOUSEMOVE.
+            if (client_caption_button(hot_))
+                return 0;
+            hot_ = HTNOWHERE;
+            caption_tip(HTNOWHERE);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        case WM_NCLBUTTONDOWN:
+            if (w == HTMAXBUTTON)
+            {
+                caption_tip(HTNOWHERE);
+                pressed_ = static_cast<int>(w);
+                SetCapture(hwnd_);
+                return 0;
+            }
+            break;
+        case WM_LBUTTONDOWN:
+        {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            const auto hit = caption_hit(p);
+            if (client_caption_button(hit))
+            {
+                caption_tip(HTNOWHERE);
+                hot_ = pressed_ = hit;
+                SetCapture(hwnd_);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0;
+            }
+            break;
+        }
+        case WM_MOUSEMOVE:
+        {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            if (pressed_ != HTNOWHERE)
+            {
+                hot_ = caption_hit(p);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0;
+            }
+            const auto hit = caption_hit(p);
+            if (client_caption_button(hit))
+            {
+                if (hot_ != hit)
+                {
+                    hot_ = hit;
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                }
+                caption_tip(hit);
+                TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, hwnd_, 0};
+                TrackMouseEvent(&t);
+                return 0;
+            }
+            if (client_caption_button(hot_))
+            {
+                hot_ = HTNOWHERE;
+                caption_tip(HTNOWHERE);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            break;
+        }
+        case WM_MOUSELEAVE:
+            if (client_caption_button(hot_) && pressed_ == HTNOWHERE)
+            {
+                hot_ = HTNOWHERE;
+                caption_tip(HTNOWHERE);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            break;
+        case WM_LBUTTONUP:
+            if (pressed_ != HTNOWHERE)
+            {
+                POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                auto hit = caption_hit(p);
+                auto old = pressed_;
+                pressed_ = HTNOWHERE;
+                ReleaseCapture();
+                if (hit == old)
+                    PostMessageW(hwnd_, WM_SYSCOMMAND,
+                                 hit == HTCLOSE       ? SC_CLOSE
+                                 : hit == HTMINBUTTON ? SC_MINIMIZE
+                                 : IsZoomed(hwnd_)    ? SC_RESTORE
+                                                      : SC_MAXIMIZE,
+                                 0);
+                return 0;
+            }
+            break;
+        case WM_CAPTURECHANGED:
+            pressed_ = HTNOWHERE;
+            break;
+        }
+    }
+    return DefWindowProcW(hwnd_, m, w, l);
+}
+} // namespace dr

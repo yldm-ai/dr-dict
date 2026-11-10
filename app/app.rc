@@ -1,0 +1,4 @@
+#include <windows.h>
+#include "resource.h"
+IDI_DR_DICT ICON "../resources/dr-dict.ico"
+1 RT_MANIFEST "app.manifest"

@@ -1,0 +1,6 @@
+add_executable(dr-engine-tests engine_tests.cpp)
+target_link_libraries(dr-engine-tests PRIVATE dr_engine miniz)
+add_test(NAME engine COMMAND dr-engine-tests)
+add_executable(dr-dict-cli ../tools/dict_cli.cpp)
+target_link_libraries(dr-dict-cli PRIVATE dr_engine)
+set_target_properties(dr-dict-cli dr-engine-tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

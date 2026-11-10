@@ -1,0 +1,7 @@
+/build*/
+/.vs/
+/out/
+/test-results/
+*.user
+/node_modules/
+/dist/
