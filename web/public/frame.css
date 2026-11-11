@@ -7,9 +7,12 @@ body {
   color: #37352f;
   background: transparent;
   font: 15px/1.65 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
-  overflow-wrap: break-word;
+  /* No overflow-wrap here: dictionary styles size boxes for their content, e.g. the reverse
+     OALDPE numbers its items in a 1em-wide ::before, and an inherited break-word split "10"
+     into two stacked digits. Only the plain text this app renders itself may wrap anywhere. */
   -webkit-font-smoothing: antialiased;
 }
+.sd-m, .sd-t, [class^='xdxf-'] { overflow-wrap: break-word; }
 img, video { max-width: 100%; height: auto; }
 table { max-width: 100%; }
 a { color: #2b6f62; }

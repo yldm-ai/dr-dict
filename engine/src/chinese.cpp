@@ -1,5 +1,7 @@
 #include "dr/chinese.h"
 #include <algorithm>
+#include <cctype>
+#include <string_view>
 #include <SimpleConverter.hpp> // OpenCC's build interface exposes its src/ folder directly
 namespace dr
 {
@@ -96,6 +98,89 @@ std::string ChineseVariants::convert(const std::string &config, const std::strin
     {
         return text;
     }
+}
+
+std::string ChineseVariants::convert_html(const std::string &html, const std::string &script,
+                                          const std::string &variant)
+{
+    std::string config;
+    if (script == "s")
+        config = "t2s";
+    else if (script == "t")
+        config = variant == "tw" ? "s2tw" : variant == "twp" ? "s2twp" : variant == "hk" ? "s2hk" : "s2t";
+    else
+        return html;
+    const auto lower = [](char c) { return static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c); };
+    const auto find_ci = [&](size_t from, std::string_view needle) {
+        for (size_t i = from; i + needle.size() <= html.size(); ++i)
+        {
+            size_t k = 0;
+            while (k < needle.size() && lower(html[i + k]) == needle[k])
+                ++k;
+            if (k == needle.size())
+                return i;
+        }
+        return std::string::npos;
+    };
+    std::string out;
+    out.reserve(html.size() + html.size() / 8);
+    size_t i = 0;
+    while (i < html.size())
+    {
+        auto lt = html.find('<', i);
+        // Text up to the next markup.
+        const auto text_end = lt == std::string::npos ? html.size() : lt;
+        if (text_end > i)
+        {
+            auto text = html.substr(i, text_end - i);
+            out += has_han(text) ? convert(config, text) : text;
+        }
+        if (lt == std::string::npos)
+            break;
+        i = lt;
+        if (html.compare(i, 4, "<!--") == 0)
+        {
+            auto end = html.find("-->", i + 4);
+            end = end == std::string::npos ? html.size() : end + 3;
+            out.append(html, i, end - i);
+            i = end;
+            continue;
+        }
+        const char next = i + 1 < html.size() ? html[i + 1] : '\0';
+        if (!(std::isalpha(static_cast<unsigned char>(next)) || next == '/' || next == '!' || next == '?'))
+        {
+            out += '<'; // a literal "<" in text
+            ++i;
+            continue;
+        }
+        // The tag itself, with quoted attribute values that may contain '>'.
+        size_t j = i + 1;
+        char quote = 0;
+        for (; j < html.size(); ++j)
+        {
+            const char c = html[j];
+            if (quote)
+                quote = c == quote ? 0 : quote;
+            else if (c == '"' || c == '\'')
+                quote = c;
+            else if (c == '>')
+                break;
+        }
+        const auto tag_end = j < html.size() ? j + 1 : html.size();
+        std::string name;
+        for (size_t k = i + 1; k < tag_end && std::isalnum(static_cast<unsigned char>(html[k])); ++k)
+            name += lower(html[k]);
+        out.append(html, i, tag_end - i);
+        i = tag_end;
+        if (name == "script" || name == "style")
+        {
+            auto close = find_ci(i, "</" + name);
+            close = close == std::string::npos ? html.size() : close;
+            out.append(html, i, close - i);
+            i = close;
+        }
+    }
+    return out;
 }
 
 std::vector<std::string> ChineseVariants::expand(const std::string &text, const std::string &variant)

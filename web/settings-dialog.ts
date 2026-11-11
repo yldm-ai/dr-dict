@@ -1,6 +1,7 @@
 import { $, call, toast } from './bridge.ts';
 import { hydrateIcons } from './icons.ts';
 import { publish, state, type Settings } from './state.ts';
+import { speak } from './speech.ts';
 
 export type Tab = 'library' | 'interface' | 'article' | 'data';
 const dialog = $<HTMLDialogElement>('settings-dialog');
@@ -28,12 +29,18 @@ function render(): void {
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input[type=radio]'))
     input.checked = String(state.settings[input.name as keyof Settings]) === input.value;
   $<HTMLInputElement>('invert-articles').checked = state.settings.invertArticles;
+  const percent = Math.round(state.settings.volume * 100);
+  $<HTMLInputElement>('volume').value = String(percent);
+  $<HTMLInputElement>('volume').style.setProperty('--fill', `${percent}%`);
+  $('volume-value').textContent = `${percent}%`;
   // Variant choices only apply while simplified/traditional lookup is on, and need OpenCC's data.
   const conversion = $<HTMLInputElement>('chinese-conversion');
   conversion.checked = state.settings.chineseConversion;
   conversion.disabled = !state.chineseAvailable;
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input[name=chineseVariant]'))
     input.disabled = !state.chineseAvailable || !state.settings.chineseConversion;
+  for (const input of dialog.querySelectorAll<HTMLInputElement>('input[name=traditionalVariant]'))
+    input.disabled = !state.chineseAvailable;
   if (!state.chineseAvailable)
     $('chinese-note').textContent = '未找到 OpenCC 数据（程序目录下的 opencc 文件夹），简繁查询不可用。';
   $('data-path').textContent = state.dataPath;
@@ -88,6 +95,19 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
     if (input.type === 'radio' && input.checked) void save({ [input.name]: input.value } as Partial<Settings>);
     else if (input.id === 'invert-articles') void save({ invertArticles: input.checked });
     else if (input.id === 'chinese-conversion') void save({ chineseConversion: input.checked });
+    else if (input.id === 'volume') void save({ volume: Number(input.value) / 100 });
+  });
+  // While dragging, the label, the slider fill and open articles follow at once; the value is
+  // saved when the slider is released (the change event above).
+  $<HTMLInputElement>('volume').addEventListener('input', (event) => {
+    const input = event.target as HTMLInputElement;
+    state.settings = { ...state.settings, volume: Number(input.value) / 100 };
+    input.style.setProperty('--fill', `${input.value}%`);
+    $('volume-value').textContent = `${input.value}%`;
+    publish('settings');
+  });
+  $('volume-test').addEventListener('click', () => {
+    speak('This is how loud pronunciations will be.', 'en-US');
   });
   $('clear-history').addEventListener('click', async () => {
     try {

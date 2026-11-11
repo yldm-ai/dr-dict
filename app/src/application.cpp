@@ -177,6 +177,20 @@ void Application::import(const Json &id, std::vector<fs::path> paths, bool resca
     });
 }
 
+namespace
+{
+// Dictionary ids a search is limited to ("dicts": [...]); none or empty means all enabled ones.
+std::vector<std::string> scope_of(const Json &params)
+{
+    std::vector<std::string> ids;
+    if (params.contains("dicts") && params["dicts"].is_array())
+        for (auto &id : params["dicts"])
+            if (id.is_string())
+                ids.push_back(id.get<std::string>());
+    return ids;
+}
+} // namespace
+
 void Application::receive(const Json &request)
 {
     if (!request.is_object() || !request.contains("id") || !request["id"].is_number_unsigned() ||
@@ -222,6 +236,35 @@ void Application::receive(const Json &request)
             webview_.send({{"id", id}, {"result", true}});
             return;
         }
+        if (method == "window.zoom")
+        {
+            // Browser zoom steps (Chromium's), for Ctrl +, Ctrl − and Ctrl 0.
+            static constexpr double steps[] = {0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1,
+                                               1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0};
+            const auto step = params.value("step", std::string("reset"));
+            const double now = webview_.zoom();
+            double next = 1.0;
+            if (step == "in")
+            {
+                next = steps[std::size(steps) - 1];
+                for (double s : steps)
+                    if (s > now + 0.001)
+                    {
+                        next = s;
+                        break;
+                    }
+            }
+            else if (step == "out")
+            {
+                next = steps[0];
+                for (double s : steps)
+                    if (s < now - 0.001)
+                        next = s;
+            }
+            webview_.set_zoom(next);
+            webview_.send({{"id", id}, {"result", next}});
+            return;
+        }
         if (method == "window.dim")
         {
             window_.set_dimmed(params.value("dimmed", false));
@@ -251,6 +294,7 @@ void Application::receive(const Json &request)
                           {"settings", library_.settings()},
                           {"defaults", Library::default_settings()},
                           {"history", library_.history()},
+                          {"favorites", library_.favorites()},
                           {"dataPath", utf8(library_.root())},
                           // The page always sees prefers-color-scheme: light (see WebView::configure),
                           // so "follow system" takes the Windows theme from here.
@@ -265,16 +309,20 @@ void Application::receive(const Json &request)
             }
             else if (method == "suggest")
                 result = library_.suggest(params.at("query").get<std::string>(),
-                                          std::min<size_t>(params.value("limit", 60), 200));
+                                          std::min<size_t>(params.value("limit", 60), 200), scope_of(params));
             else if (method == "lookup")
             {
                 auto word = params.at("word").get<std::string>();
-                result = library_.lookup(word);
+                result = library_.lookup(word, scope_of(params));
                 if (!result["results"].empty() && params.value("remember", true))
                     result["history"] = library_.remember(result.value("word", word));
             }
             else if (method == "history.clear")
                 result = library_.clear_history();
+            else if (method == "history.remove")
+                result = library_.forget_word(params.at("word").get<std::string>());
+            else if (method == "favorites.toggle")
+                result = library_.toggle_favorite(params.at("word").get<std::string>());
             else if (method == "dict.list")
                 result = library_.list();
             else if (method == "dict.folders")
@@ -344,7 +392,10 @@ void Application::resource(const std::wstring &wide_uri, std::function<void(Reso
                 theme = "light";
             if (route == "@article")
             {
-                reply = {200, "text/html; charset=utf-8", library_.article_page(id, query["word"], theme)};
+                // "script": s / t shows the article in simplified / traditional characters;
+                // "variant" picks the traditional standard (t, tw, twp, hk).
+                reply = {200, "text/html; charset=utf-8",
+                         library_.article_page(id, query["word"], theme, query["script"], query["variant"])};
             }
             else if (route == "@about")
                 reply = {200, "text/html; charset=utf-8", library_.about_page(id, theme)};
@@ -383,7 +434,8 @@ int Application::run(HINSTANCE instance)
     webview_.on_toggle_borderless = window_.on_toggle_borderless;
     window_.on_system_theme = [this](bool dark) { webview_.send({{"event", "system-theme"}, {"dark", dark}}); };
     window_.on_caption_tooltip = [this](const std::wstring &text, RECT button) {
-        const double scale = 96.0 / GetDpiForWindow(window_.handle());
+        // Client pixels → CSS pixels of the (possibly zoomed) page.
+        const double scale = 96.0 / GetDpiForWindow(window_.handle()) / webview_.zoom();
         webview_.send({{"event", "caption-tooltip"},
                        {"text", narrow(text)},
                        {"left", button.left * scale},
@@ -396,6 +448,12 @@ int Application::run(HINSTANCE instance)
     };
     webview_.on_error = [this](const std::wstring &error) {
         MessageBoxW(window_.handle(), error.c_str(), L"DR Dict", MB_OK | MB_ICONERROR);
+    };
+    // Page zoom survives restarts; every change (Ctrl+wheel included) is saved and announced.
+    webview_.set_zoom(settings.value("zoom", 1.0));
+    webview_.on_zoom = [this](double factor) {
+        webview_.send({{"event", "zoom"}, {"factor", factor}});
+        queries_.enqueue([this, factor] { library_.save_settings({{"zoom", factor}}); });
     };
     webview_.resize(window_.content_bounds());
     webview_.create(window_.handle(), assets_, library_.root());

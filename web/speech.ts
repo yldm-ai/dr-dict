@@ -1,6 +1,8 @@
 // Reads dictionary text aloud for pronunciation buttons that carry no recording (see frame.js).
 // Uses the Windows voices exposed through the Web Speech API, so it works offline.
 
+import { state } from './state.ts';
+
 const synth = window.speechSynthesis as SpeechSynthesis | undefined;
 // Voices load asynchronously; asking once at start-up has them ready by the first click.
 synth?.getVoices();
@@ -25,6 +27,7 @@ export function speak(text: string, lang: string): boolean {
   const voice = pickVoice(lang);
   if (voice) utterance.voice = voice;
   utterance.lang = voice?.lang ?? lang;
+  utterance.volume = state.settings.volume;
   synth.speak(utterance);
   return true;
 }

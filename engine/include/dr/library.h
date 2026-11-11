@@ -38,6 +38,10 @@ class Library
     Json history();
     Json remember(const std::string &word);
     Json clear_history();
+    Json forget_word(const std::string &word);
+    // Starred words, newest first ([{word, at}]); toggling a starred word removes it.
+    Json favorites();
+    Json toggle_favorite(const std::string &word);
 
     // Files (.mdx/.ifo) or folders scanned recursively. Folders are remembered for rescan().
     Json add(const std::vector<fs::path> &paths, const Progress &progress);
@@ -57,10 +61,16 @@ class Library
     Json reindex(const std::string &id, const Progress &progress);
     Json info(const std::string &id);
 
-    Json suggest(const std::string &query, size_t limit);
-    Json lookup(const std::string &word);
+    // `scope` limits a search to these dictionary ids (still only enabled ones); empty means all.
+    Json suggest(const std::string &query, size_t limit, const std::vector<std::string> &scope = {});
+    Json lookup(const std::string &word, const std::vector<std::string> &scope = {});
     // Complete HTML documents rendered inside the per-dictionary article frames.
-    std::string article_page(const std::string &id, const std::string &word, const std::string &theme);
+    /**
+     * `script`: "" as written, "s" simplified or "t" traditional (OpenCC, text only). `variant` is
+     * the traditional standard (t, tw, twp, hk); empty or invalid uses the "traditionalVariant" setting.
+     */
+    std::string article_page(const std::string &id, const std::string &word, const std::string &theme,
+                             const std::string &script = "", const std::string &variant = "");
     std::string about_page(const std::string &id, const std::string &theme);
     std::optional<Resource> resource(const std::string &id, const std::string &path);
     std::optional<Resource> icon(const std::string &id);
@@ -84,7 +94,7 @@ class Library
     Json entry(const std::string &id);
     int number_for(sqlite3 *db, const std::string &id);
     Json build(const fs::path &path, const std::string &id, const Progress &progress);
-    std::vector<std::pair<int, std::string>> enabled_numbers();
+    std::vector<std::pair<int, std::string>> enabled_numbers(const std::vector<std::string> &scope = {});
     Json status(const Json &meta);
     std::string page(const std::string &theme, const std::string &body);
 

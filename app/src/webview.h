@@ -29,6 +29,10 @@ class WebView
     void create(HWND window, const fs::path &web_root, const fs::path &data_root);
     void resize(RECT bounds);
     void send(const Json &message);
+    // Page zoom as in a browser (Ctrl+wheel, Ctrl +/−/0), applied to the whole page and its frames.
+    void set_zoom(double factor);
+    double zoom() const { return zoom_; }
+    std::function<void(double)> on_zoom; // after a change once the view exists (not the initial value)
     std::function<void(const Json &)> on_message;
     std::function<void(const std::wstring &)> on_error;
     std::function<void()> on_toggle_borderless;
@@ -40,6 +44,7 @@ class WebView
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> controller_;
     Microsoft::WRL::ComPtr<ICoreWebView2> view_;
     RECT bounds_{};
+    double zoom_ = 1.0;
     void fail(HRESULT error, const wchar_t *step);
     void configure(const fs::path &web_root);
 };

@@ -40,6 +40,13 @@ class ChineseVariants
     std::vector<std::string> expand(const std::string &text, const std::string &variant);
     /** Whether OpenCC data is present at all. */
     bool available() const;
+    /**
+     * Rewrites the text of an HTML fragment in simplified (`script` "s") or traditional ("t", in
+     * the standard named by `variant`) characters. Only text between tags changes: tags and their
+     * attributes (resource names, links, classes), comments, and <script>/<style> contents stay as
+     * they are. Unknown scripts return `html` unchanged.
+     */
+    std::string convert_html(const std::string &html, const std::string &script, const std::string &variant);
 
   private:
     std::string convert(const std::string &config, const std::string &text);

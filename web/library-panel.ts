@@ -40,6 +40,130 @@ function statusBadge(d: Dictionary): string {
 
 // The removed group starts collapsed each time the library tab is shown.
 let showRemoved = false;
+// Ticked dictionaries for batch actions; the bar above the list appears while any are ticked.
+const selected = new Set<string>();
+let confirmingBatch = false;
+const batchBar = $('batch-bar');
+
+function renderBatch(): void {
+  // Drop ticks of dictionaries that left the active list.
+  const active = new Set(activeDictionaries().map((d) => d.id));
+  for (const id of [...selected]) if (!active.has(id)) selected.delete(id);
+  list.classList.toggle('selecting', selected.size > 0);
+  batchBar.hidden = selected.size === 0;
+  if (!selected.size) {
+    confirmingBatch = false;
+    return;
+  }
+  const all = selected.size === active.size;
+  batchBar.innerHTML = confirmingBatch
+    ? `<span class="batch-count">将 ${selected.size} 部词典移到“已移除”？</span>
+       <button class="button danger small" type="button" data-batch="remove-confirm">移除</button>
+       <button class="button small" type="button" data-batch="remove-cancel">取消</button>`
+    : `<label class="batch-all"><input type="checkbox" data-batch="all" ${all ? 'checked' : ''}/><span>已选 ${selected.size} 部</span></label>
+       <span class="batch-actions">
+         <button class="button small" type="button" data-batch="enable">启用</button>
+         <button class="button small" type="button" data-batch="disable">停用</button>
+         <button class="button small danger" type="button" data-batch="remove" ${state.importing ? 'disabled' : ''}>移除</button>
+         <button class="button small ghost" type="button" data-batch="clear">取消选择</button>
+       </span>`;
+}
+
+async function runBatch(action: string): Promise<void> {
+  const ids = activeDictionaries()
+    .map((d) => d.id)
+    .filter((id) => selected.has(id));
+  switch (action) {
+    case 'all':
+      if (selected.size === activeDictionaries().length) selected.clear();
+      else for (const d of activeDictionaries()) selected.add(d.id);
+      render();
+      return;
+    case 'clear':
+      selected.clear();
+      render();
+      return;
+    case 'remove':
+      confirmingBatch = true;
+      renderBatch();
+      return;
+    case 'remove-cancel':
+      confirmingBatch = false;
+      renderBatch();
+      return;
+  }
+  for (const button of batchBar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
+  try {
+    if (action === 'enable' || action === 'disable') {
+      for (const id of ids) setDictionaries(await call('dict.update', { id, patch: { enabled: action === 'enable' } }));
+      toast(`已${action === 'enable' ? '启用' : '停用'} ${ids.length} 部词典`, 'success');
+    } else if (action === 'remove-confirm') {
+      confirmingBatch = false;
+      for (const id of ids) setDictionaries(await call('dict.remove', { id }));
+      selected.clear();
+      toast(`已将 ${ids.length} 部词典移到“已移除”，可随时恢复`, 'success');
+    }
+  } catch (error) {
+    toast((error as Error).message, 'error');
+  }
+  render();
+}
+
+// Drag a row to reorder the active dictionaries; the drop line shows before or after the target.
+let dragging = '';
+function clearDropMarks(): void {
+  for (const row of list.querySelectorAll('.drop-before, .drop-after, .dragging'))
+    row.classList.remove('drop-before', 'drop-after', 'dragging');
+}
+function initDrag(): void {
+  list.addEventListener('dragstart', (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('.dict-row:not(.removed)');
+    if (!row || state.importing) {
+      event.preventDefault();
+      return;
+    }
+    dragging = row.dataset.id!;
+    event.dataTransfer!.effectAllowed = 'move';
+    event.dataTransfer!.setData('text/plain', dragging);
+    row.classList.add('dragging');
+  });
+  list.addEventListener('dragover', (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('.dict-row:not(.removed)');
+    if (!dragging || !row) return;
+    event.preventDefault();
+    event.dataTransfer!.dropEffect = 'move';
+    const rect = row.getBoundingClientRect();
+    const before = event.clientY < rect.top + rect.height / 2;
+    for (const other of list.querySelectorAll('.drop-before, .drop-after'))
+      if (other !== row) other.classList.remove('drop-before', 'drop-after');
+    row.classList.toggle('drop-before', before && row.dataset.id !== dragging);
+    row.classList.toggle('drop-after', !before && row.dataset.id !== dragging);
+  });
+  list.addEventListener('drop', async (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('.dict-row:not(.removed)');
+    const moved = dragging;
+    const after = row?.classList.contains('drop-after');
+    clearDropMarks();
+    dragging = '';
+    if (!row || !moved || row.dataset.id === moved) return;
+    event.preventDefault();
+    const ids = activeDictionaries()
+      .map((d) => d.id)
+      .filter((id) => id !== moved);
+    const at = ids.indexOf(row.dataset.id!) + (after ? 1 : 0);
+    ids.splice(at, 0, moved);
+    try {
+      setDictionaries(await call('dict.reorder', { ids }));
+    } catch (error) {
+      toast((error as Error).message, 'error');
+      render();
+    }
+  });
+  list.addEventListener('dragend', () => {
+    clearDropMarks();
+    dragging = '';
+  });
+}
 
 function removedRow(d: Dictionary): string {
   const meta = [formatNames[d.format] ?? d.format, `${formatNumber(d.entries ?? 0)} 词条`].join(' · ');
@@ -75,6 +199,7 @@ function render(): void {
         <div class="dict-empty-title">词典库是空的</div>
         <div>添加 .mdx 或 .ifo 文件，或选择一个存放词典的文件夹。</div>
       </li>${removedGroup}`;
+    renderBatch();
     return;
   }
   const count = active.length;
@@ -98,7 +223,9 @@ function render(): void {
              <button class="icon-button small" type="button" data-action="about" title="简介" ${d.status === 'missing' ? 'disabled' : ''}>${icon('info')}</button>
              <button class="icon-button small" type="button" data-action="reindex" title="重建索引" ${d.status === 'missing' || state.importing ? 'disabled' : ''}>${icon('refresh')}</button>
              <button class="icon-button small" type="button" data-action="remove" title="移除" ${state.importing ? 'disabled' : ''}>${icon('trash')}</button>`;
-      return `<li class="dict-row${d.enabled ? '' : ' disabled'}" data-id="${escape(d.id)}">
+      return `<li class="dict-row${d.enabled ? '' : ' disabled'}${selected.has(d.id) ? ' selected' : ''}" data-id="${escape(d.id)}" draggable="true">
+          <span class="dict-grip" aria-hidden="true"><svg viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></span>
+          <input class="dict-check" type="checkbox" data-action="select" aria-label="选择 ${escape(d.name)}" ${selected.has(d.id) ? 'checked' : ''}/>
           ${avatar(d, 28)}
           <div class="dict-main">
             <div class="dict-name">${escape(d.name)} ${statusBadge(d)}</div>
@@ -110,6 +237,7 @@ function render(): void {
         </li>`;
     })
     .join('') + removedGroup;
+  renderBatch();
 }
 
 function setImporting(value: boolean): void {
@@ -307,6 +435,8 @@ async function act(action: string, id: string, input?: HTMLInputElement): Promis
 export function resetLibrary(): void {
   confirming = '';
   showRemoved = false;
+  selected.clear();
+  confirmingBatch = false;
   hideAbout();
   render();
   void loadFolders();
@@ -347,7 +477,21 @@ export function initLibrary(on: (event: string, handler: (message: any) => void)
     const input = event.target as HTMLInputElement;
     const row = input.closest<HTMLElement>('.dict-row');
     if (input.dataset.action === 'toggle' && row) void act('toggle', row.dataset.id!, input);
+    if (input.dataset.action === 'select' && row) {
+      if (input.checked) selected.add(row.dataset.id!);
+      else selected.delete(row.dataset.id!);
+      row.classList.toggle('selected', input.checked);
+      renderBatch();
+    }
   });
+  batchBar.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-batch]');
+    if (button) void runBatch(button.dataset.batch!);
+  });
+  batchBar.addEventListener('change', (event) => {
+    if ((event.target as HTMLInputElement).dataset.batch === 'all') void runBatch('all');
+  });
+  initDrag();
   on('import-start', () => setImporting(true));
   on('import-progress', (p) => {
     if (!state.importing) setImporting(true);

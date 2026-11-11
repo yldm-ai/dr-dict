@@ -2,6 +2,8 @@
 const paths: Record<string, string> = {
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  // Filled through CSS (.favorite-button[aria-pressed=true] path { fill: currentColor }).
+  star: '<path d="M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/>',
   plus: '<path d="M12 5.5v13M5.5 12h13"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.8l2 2h7.2a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   book: '<path d="M5.5 5.5a2 2 0 0 1 2-2h10v14h-10a2 2 0 0 0-2 2z"/><path d="M5.5 19.5a2 2 0 0 0 2 2h10v-4"/>',
@@ -17,6 +19,7 @@ const paths: Record<string, string> = {
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.75v.01"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5v-2a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
   alert: '<path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4.5M12 17.25v.01"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   sound: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',

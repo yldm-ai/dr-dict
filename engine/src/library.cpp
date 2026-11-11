@@ -246,6 +246,14 @@ Json Library::default_settings()
             // Look Chinese queries up in their simplified and traditional writings as well.
             {"chineseConversion", false},
             {"chineseVariant", "t"},
+            // Standard the 繁 button in an article header converts to unless another is picked there.
+            {"traditionalVariant", "t"},
+            // Dictionaries searched from the search box; empty means every enabled dictionary.
+            {"scope", Json::array()},
+            // Playback volume (0–1) for pronunciations, recorded or read aloud.
+            {"volume", 0.22},
+            // Page zoom of the window (Ctrl+wheel, Ctrl +/−/0), kept across restarts.
+            {"zoom", 1.0},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
             {"window", {{"widthRatio", 0.4}, {"heightRatio", 0.5}}}};
 }
@@ -312,6 +320,21 @@ Json Library::save_settings(const Json &patch)
     if (patch.contains("chineseVariant") && patch["chineseVariant"].is_string() &&
         valid_chinese_variant(patch["chineseVariant"]))
         current["chineseVariant"] = patch["chineseVariant"];
+    if (patch.contains("traditionalVariant") && patch["traditionalVariant"].is_string() &&
+        valid_chinese_variant(patch["traditionalVariant"]) && patch["traditionalVariant"] != "all")
+        current["traditionalVariant"] = patch["traditionalVariant"];
+    if (patch.contains("volume") && patch["volume"].is_number())
+        current["volume"] = std::clamp(patch["volume"].get<double>(), 0.0, 1.0);
+    if (patch.contains("zoom") && patch["zoom"].is_number())
+        current["zoom"] = std::clamp(patch["zoom"].get<double>(), 0.25, 5.0);
+    if (patch.contains("scope") && patch["scope"].is_array() && patch["scope"].size() <= 1000)
+    {
+        Json ids = Json::array();
+        for (auto &id : patch["scope"])
+            if (id.is_string() && id.get<std::string>().size() <= 64)
+                ids.push_back(id);
+        current["scope"] = ids;
+    }
     std::lock_guard lock(mutex_);
     write_atomic(root_ / "settings.json", current.dump(2));
     return current;
@@ -344,6 +367,55 @@ Json Library::remember(const std::string &word)
     Json next = Json::array({{{"word", w}, {"at", now_ms()}}});
     for (auto &item : list)
         if (item.is_object() && item.value("word", "") != w && next.size() < 200)
+            next.push_back(item);
+    std::lock_guard lock(mutex_);
+    write_atomic(root_ / "history.json", next.dump());
+    return next;
+}
+Json Library::favorites()
+{
+    std::lock_guard lock(mutex_);
+    try
+    {
+        auto path = root_ / "favorites.json";
+        if (fs::exists(path))
+        {
+            auto list = Json::parse(read_file(path));
+            if (list.is_array())
+                return list;
+        }
+    }
+    catch (const std::exception &)
+    {
+    }
+    return Json::array();
+}
+Json Library::toggle_favorite(const std::string &word)
+{
+    auto w = trim(word);
+    auto list = favorites();
+    if (w.empty() || w.size() > 200)
+        return list;
+    Json next = Json::array();
+    bool removed = false;
+    for (auto &item : list)
+        if (item.is_object() && item.value("word", "") == w)
+            removed = true;
+        else
+            next.push_back(item);
+    // Newest first; a word already starred is unstarred.
+    if (!removed)
+        next.insert(next.begin(), Json{{"word", w}, {"at", now_ms()}});
+    std::lock_guard lock(mutex_);
+    write_atomic(root_ / "favorites.json", next.dump());
+    return next;
+}
+Json Library::forget_word(const std::string &word)
+{
+    auto list = history();
+    Json next = Json::array();
+    for (auto &item : list)
+        if (item.is_object() && item.value("word", "") != word)
             next.push_back(item);
     std::lock_guard lock(mutex_);
     write_atomic(root_ / "history.json", next.dump());
@@ -471,14 +543,18 @@ int Library::number_for(sqlite3 *db, const std::string &id)
     insert.step();
     return static_cast<int>(sqlite3_last_insert_rowid(db));
 }
-std::vector<std::pair<int, std::string>> Library::enabled_numbers()
+std::vector<std::pair<int, std::string>> Library::enabled_numbers(const std::vector<std::string> &scope)
 {
     std::vector<std::string> ids;
     {
         std::lock_guard lock(mutex_);
         for (auto &meta : load_entries())
-            if (meta.value("enabled", true) && !meta.value("removed", false))
-                ids.push_back(meta.value("id", ""));
+        {
+            auto id = meta.value("id", "");
+            if (meta.value("enabled", true) && !meta.value("removed", false) &&
+                (scope.empty() || std::find(scope.begin(), scope.end(), id) != scope.end()))
+                ids.push_back(id);
+        }
     }
     std::vector<std::pair<int, std::string>> result;
     std::lock_guard lock(db_mutex_);
@@ -923,7 +999,7 @@ Json Library::info(const std::string &id)
     return result;
 }
 
-Json Library::suggest(const std::string &query, size_t limit)
+Json Library::suggest(const std::string &query, size_t limit, const std::vector<std::string> &scope)
 {
     Json result = Json::array();
     std::vector<std::string> keys;
@@ -938,16 +1014,23 @@ Json Library::suggest(const std::string &query, size_t limit)
     if (keys.empty())
         return result;
     std::unordered_set<int> enabled;
-    for (auto &[num, id] : enabled_numbers())
+    for (auto &[num, id] : enabled_numbers(scope))
         enabled.insert(num);
     if (enabled.empty())
         return result;
+    // Restrict the range scan to the searched dictionaries, so a narrow scope still fills the
+    // list (the numbers are integers from our own table, safe to inline).
+    std::string in;
+    for (int num : enabled)
+        in += (in.empty() ? "" : ",") + std::to_string(num);
+    const auto sql =
+        "SELECT key, word, dict FROM words WHERE key >= ?1 AND key < ?2 AND dict IN (" + in + ") ORDER BY key LIMIT ?3";
     std::lock_guard lock(db_mutex_);
     // The typed writing comes first; its simplified/traditional variants fill the rest.
     std::unordered_set<std::string> seen;
     for (auto &key : keys)
     {
-        Statement s(db_, "SELECT key, word, dict FROM words WHERE key >= ?1 AND key < ?2 ORDER BY key LIMIT ?3");
+        Statement s(db_, sql.c_str());
         s.bind(1, key).bind(2, key + "\xf4\x8f\xbf\xbf").bind(3, static_cast<int64_t>(limit * 8));
         while (s.step() && result.size() < limit)
         {
@@ -963,10 +1046,10 @@ Json Library::suggest(const std::string &query, size_t limit)
     return result;
 }
 
-Json Library::lookup(const std::string &input)
+Json Library::lookup(const std::string &input, const std::vector<std::string> &scope)
 {
     auto word = trim(input);
-    auto order = enabled_numbers();
+    auto order = enabled_numbers(scope);
     std::map<std::string, std::string> names;
     {
         std::lock_guard lock(mutex_);
@@ -1027,7 +1110,8 @@ Json Library::lookup(const std::string &input)
             }
         }
     if (result["results"].empty())
-        result["suggestions"] = suggest(word.substr(0, std::max<size_t>(1, word.size() > 3 ? word.size() - 1 : word.size())), 12);
+        result["suggestions"] =
+            suggest(word.substr(0, std::max<size_t>(1, word.size() > 3 ? word.size() - 1 : word.size())), 12, scope);
     return result;
 }
 
@@ -1040,7 +1124,8 @@ std::string Library::page(const std::string &theme, const std::string &body)
            body + "</body></html>";
 }
 
-std::string Library::article_page(const std::string &id, const std::string &word, const std::string &theme)
+std::string Library::article_page(const std::string &id, const std::string &word, const std::string &theme,
+                                  const std::string &script, const std::string &variant)
 {
     auto dict = open(id);
     int num = 0;
@@ -1091,6 +1176,21 @@ std::string Library::article_page(const std::string &id, const std::string &word
     }
     if (!articles)
         body = "<p class=\"dr-empty\">该词典中没有这个词条的正文。</p>";
+    else if (script == "s" || script == "t")
+    {
+        // Shown in simplified or traditional characters on request (the switch in the article header).
+        std::shared_ptr<ChineseVariants> chinese;
+        {
+            std::lock_guard lock(mutex_);
+            chinese = chinese_;
+        }
+        // Traditional: the standard picked in the header, else the default from the settings.
+        auto standard = variant;
+        if (!valid_chinese_variant(standard) || standard == "all")
+            standard = settings().value("traditionalVariant", std::string("t"));
+        if (chinese && chinese->available())
+            body = chinese->convert_html(body, script, standard);
+    }
     return page(theme, body);
 }
 

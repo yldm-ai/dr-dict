@@ -217,6 +217,10 @@ int main()
         CHECK(plural["results"].size() == 1);
         auto syn = library.lookup("hi");
         CHECK(syn["results"].size() == 1);
+        // A search can be limited to some dictionaries.
+        CHECK(library.lookup("apple", {sd_id})["results"].empty());
+        CHECK(library.lookup("apple", {mdx_id})["results"].size() == 1);
+        CHECK(library.suggest("ba", 10, {sd_id}).empty() && library.suggest("ba", 10, {mdx_id}).size() == 1);
 
         auto page = library.article_page(mdx_id, "pomme", "light");
         CHECK(page.find("苹果") != std::string::npos);
@@ -281,6 +285,18 @@ int main()
         library.remember("pear");
         auto history = library.remember("apple");
         CHECK(history.size() == 2 && history[0]["word"] == "apple");
+        history = library.forget_word("apple");
+        CHECK(history.size() == 1 && history[0]["word"] == "pear" && library.history().size() == 1);
+        CHECK(library.favorites().empty());
+        library.toggle_favorite("apple");
+        auto stars = library.toggle_favorite("pear");
+        CHECK(stars.size() == 2 && stars[0]["word"] == "pear");
+        stars = library.toggle_favorite("apple"); // starring again unstars
+        CHECK(stars.size() == 1 && library.favorites()[0]["word"] == "pear");
+        CHECK(library.save_settings({{"volume", 3}})["volume"] == 1.0);
+        CHECK(library.save_settings({{"volume", 0.5}})["volume"] == 0.5);
+        auto scoped = library.save_settings({{"scope", Json::array({mdx_id, 3})}});
+        CHECK(scoped["scope"] == Json::array({mdx_id}));
         auto settings = library.save_settings({{"theme", "dark"}, {"shell", "bogus"}});
         CHECK(settings["theme"] == "dark" && settings["shell"] == "mica");
     }
@@ -347,6 +363,16 @@ int main()
         CHECK(has(cc.expand("里面", "t"), "裏面") && has(cc.expand("里面", "tw"), "裡面"));
         CHECK(cc.expand("apple", "all").empty() && cc.expand("软件", "bogus").empty());
         CHECK(has_han("A 字") && !has_han("abc") && !has_han("かな"));
+        // Article text switches script; markup, resource names, scripts and styles do not.
+        auto html = cc.convert_html(
+            "<p class=\"長\" title='a>長'><img src=\"長.png\">長度 a<b <!--長--><script>var s='長';</script>"
+            "<STYLE>.長{}</STYLE><b>长</b></p>",
+            "s", "t");
+        CHECK(html == "<p class=\"長\" title='a>長'><img src=\"長.png\">长度 a<b <!--長--><script>var s='長';</script>"
+                      "<STYLE>.長{}</STYLE><b>长</b></p>");
+        CHECK(cc.convert_html("<i>软件</i>", "t", "twp") == "<i>軟體</i>");
+        CHECK(cc.convert_html("<i>软件</i>", "t", "t") == "<i>軟件</i>");
+        CHECK(cc.convert_html("<i>軟</i>", "x", "t") == "<i>軟</i>");
 
         // A dictionary written only in Taiwan forms.
         write_mdict(dicts / "zh" / "zh.mdx", {{"軟體", "<p>software</p>"}, {"裏面", "<p>inside</p>"}}, false, false);
@@ -365,6 +391,32 @@ int main()
         {
             auto zh_id = hit["results"][0]["id"].get<std::string>();
             CHECK(zh.article_page(zh_id, "软件", "light").find("software") != std::string::npos);
+        }
+        write_mdict(dicts / "zh2" / "zh2.mdx", {{"長", "<p>長度</p>"}}, false, false);
+        CHECK(zh.add({dicts / "zh2" / "zh2.mdx"}, {})["added"] == 1);
+        auto long_hit = zh.lookup("長");
+        CHECK(!long_hit["results"].empty());
+        if (!long_hit["results"].empty())
+        {
+            auto id = long_hit["results"][0]["id"].get<std::string>();
+            CHECK(zh.article_page(id, "長", "light", "s").find("<p>长度</p>") != std::string::npos);
+            CHECK(zh.article_page(id, "長", "light").find("<p>長度</p>") != std::string::npos);
+        }
+        // 繁: the standard chosen in the header, else the "traditionalVariant" setting.
+        write_mdict(dicts / "zh3" / "zh3.mdx", {{"软", "<p>软件</p>"}}, false, false);
+        CHECK(zh.add({dicts / "zh3" / "zh3.mdx"}, {})["added"] == 1);
+        CHECK(Library::default_settings()["traditionalVariant"] == "t");
+        CHECK(zh.save_settings({{"traditionalVariant", "all"}})["traditionalVariant"] == "t");
+        auto soft = zh.lookup("软");
+        CHECK(!soft["results"].empty());
+        if (!soft["results"].empty())
+        {
+            auto id = soft["results"][0]["id"].get<std::string>();
+            CHECK(zh.article_page(id, "软", "light", "t").find("<p>軟件</p>") != std::string::npos);
+            CHECK(zh.article_page(id, "软", "light", "t", "twp").find("<p>軟體</p>") != std::string::npos);
+            zh.save_settings({{"traditionalVariant", "twp"}});
+            CHECK(zh.article_page(id, "软", "light", "t").find("<p>軟體</p>") != std::string::npos);
+            CHECK(zh.article_page(id, "软", "light", "t", "t").find("<p>軟件</p>") != std::string::npos);
         }
         zh.save_settings({{"chineseVariant", "t"}});
         CHECK(zh.lookup("里面")["results"].size() == 1);

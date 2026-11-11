@@ -16,6 +16,13 @@ export type Dictionary = {
 export function activeDictionaries(): Dictionary[] {
   return state.dictionaries.filter((d) => !d.removed);
 }
+export type TraditionalVariant = 't' | 'tw' | 'twp' | 'hk';
+export const traditionalNames: Record<TraditionalVariant, string> = {
+  t: '繁体（OpenCC 标准）',
+  tw: '台湾正体',
+  twp: '台湾正体及台湾用词',
+  hk: '香港繁体',
+};
 export type Settings = {
   theme: 'light' | 'dark' | 'system';
   shell: 'mica' | 'direct2d';
@@ -23,6 +30,12 @@ export type Settings = {
   articleWidth: 'narrow' | 'comfortable' | 'wide';
   chineseConversion: boolean;
   chineseVariant: 't' | 'tw' | 'twp' | 'hk' | 'all';
+  // What the 繁 button in an article header converts to by default.
+  traditionalVariant: TraditionalVariant;
+  // Dictionary ids searched from the search box; empty means all enabled dictionaries.
+  scope: string[];
+  // Pronunciation volume, 0–1.
+  volume: number;
 };
 export type HistoryItem = { word: string; at: number };
 
@@ -35,8 +48,12 @@ export const state = {
     articleWidth: 'comfortable',
     chineseConversion: false,
     chineseVariant: 't',
+    traditionalVariant: 't',
+    scope: [],
+    volume: 0.22,
   } as Settings,
   history: [] as HistoryItem[],
+  favorites: [] as HistoryItem[],
   dataPath: '',
   // Whether OpenCC's data shipped with the app, so simplified/traditional lookup can work.
   chineseAvailable: false,
@@ -45,7 +62,7 @@ export const state = {
 
 // 'settings' fires for every change, including optimistic ones; 'saved' only once the native
 // side has stored them, which is when lookups see the new values.
-type Topic = 'dictionaries' | 'settings' | 'saved' | 'history';
+type Topic = 'dictionaries' | 'settings' | 'saved' | 'history' | 'favorites';
 const subscribers = new Map<Topic, Set<() => void>>();
 export function subscribe(topic: Topic, handler: () => void): void {
   if (!subscribers.has(topic)) subscribers.set(topic, new Set());

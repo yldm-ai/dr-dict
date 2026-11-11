@@ -1,5 +1,7 @@
 #include "webview.h"
 #include "dr/text.h"
+#include <algorithm>
+#include <cmath>
 #include <shlwapi.h>
 #include <sstream>
 namespace dr
@@ -39,6 +41,16 @@ void WebView::resize(RECT bounds)
     if (controller_)
         controller_->put_Bounds(bounds);
 }
+void WebView::set_zoom(double factor)
+{
+    const double next = std::clamp(factor, 0.25, 5.0);
+    const bool changed = std::abs(next - zoom_) > 1e-6;
+    zoom_ = next;
+    if (controller_)
+        controller_->put_ZoomFactor(zoom_);
+    if (changed && controller_ && on_zoom)
+        on_zoom(zoom_);
+}
 void WebView::send(const Json &message)
 {
     if (view_)
@@ -73,6 +85,7 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     if (SUCCEEDED(controller_.As(&controller2)))
                                         controller2->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0, 0, 0, 0});
                                     controller_->put_Bounds(bounds_);
+                                    controller_->put_ZoomFactor(zoom_);
                                     configure(web_root);
                                     return S_OK;
                                 })
@@ -135,6 +148,9 @@ void WebView::configure(const fs::path &web_root)
     view_->get_Settings(&settings);
     settings->put_IsStatusBarEnabled(FALSE);
     settings->put_AreHostObjectsAllowed(FALSE);
+    // Zoom is driven by the page (Ctrl+wheel and Ctrl +/−/0, in the UI and in article frames) through
+    // window.zoom → set_zoom, so every change takes the same steps and is saved. The built-in
+    // control stays off: ZoomFactorChanged is not raised for put_ZoomFactor in this runtime.
     settings->put_IsZoomControlEnabled(FALSE);
 #ifdef NDEBUG
     settings->put_AreDevToolsEnabled(FALSE);

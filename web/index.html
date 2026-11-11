@@ -34,8 +34,18 @@
             <span data-icon="x"></span>
           </button>
           <kbd class="search-hint">Ctrl K</kbd>
+          <button id="scope-button" class="scope-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="scope-menu" title="查询范围：全部词典">
+            <span data-icon="library"></span><span id="scope-count" class="scope-count" hidden></span>
+          </button>
+          <div id="scope-menu" class="scope-menu" role="menu" hidden></div>
         </div>
-        <div class="side-label" id="list-label">最近查询</div>
+        <div class="side-label" id="list-label">
+          <span id="list-title" hidden>联想</span>
+          <div id="list-tabs" class="side-tabs" role="tablist" aria-label="列表">
+            <button type="button" role="tab" data-list="history" aria-selected="true">最近查询</button>
+            <button type="button" role="tab" data-list="favorites" aria-selected="false">收藏</button>
+          </div>
+        </div>
         <ul id="word-list" class="word-list" role="listbox" aria-labelledby="list-label"></ul>
         <div id="list-empty" class="list-empty" hidden></div>
         <div class="sidebar-footer">
@@ -55,12 +65,16 @@
               <span data-icon="arrow-right"></span>
             </button>
           </div>
-          <nav id="jump" class="jump" aria-label="跳转到词典"></nav>
+          <button id="favorite" class="icon-button favorite-button" type="button" title="收藏 (Ctrl D)" aria-label="收藏" aria-pressed="false" disabled>
+            <span data-icon="star"></span>
+          </button>
         </header>
         <div id="content" class="content">
           <section id="home" class="home"></section>
           <section id="results" class="results" hidden></section>
         </div>
+        <!-- Table of contents: a rail of short lines at the right that unfolds on hover. -->
+        <nav id="jump" class="toc" aria-label="跳转到词典" hidden></nav>
       </main>
     </div>
 
@@ -90,6 +104,7 @@
             <div class="bar"><span id="import-bar"></span></div>
           </div>
           <div id="folder-list" class="folder-list" hidden></div>
+          <div id="batch-bar" class="batch-bar" hidden></div>
           <ul id="dict-list" class="dict-list"></ul>
           <div id="dict-about" class="dict-about" hidden>
             <button id="about-back" class="button ghost" type="button"><span data-icon="arrow-left"></span>返回词典库</button>
@@ -128,6 +143,15 @@
               <label class="choice"><input id="invert-articles" type="checkbox" /><span>反色显示词条</span></label>
               <p class="group-note">关闭后，词条在深色模式中保持原有的浅色纸面</p>
             </fieldset>
+            <fieldset class="group">
+              <legend>发音音量</legend>
+              <div class="volume-row">
+                <input id="volume" class="volume-slider" type="range" min="0" max="100" step="1" aria-label="发音音量" />
+                <output id="volume-value" class="volume-value" for="volume">22%</output>
+                <button id="volume-test" class="button small" type="button">试听</button>
+              </div>
+              <p class="group-note plain">词典录音和朗读都使用这个音量。</p>
+            </fieldset>
             <fieldset class="group wide" id="chinese-group">
               <legend>中文简繁</legend>
               <label class="choice"><input id="chinese-conversion" type="checkbox" /><span>查中文时同时查简体和繁体</span></label>
@@ -139,6 +163,16 @@
                 <label class="choice"><input type="radio" name="chineseVariant" value="all" /><span>以上全部</span></label>
               </div>
               <p class="group-note" id="chinese-note">繁体输入会先转成简体再查。例：查“软件”也查“軟件”；选“台湾用词”时还查“軟體”。</p>
+            </fieldset>
+            <fieldset class="group wide" id="traditional-group">
+              <legend>释义的“繁”按钮</legend>
+              <div class="choice-grid">
+                <label class="choice"><input type="radio" name="traditionalVariant" value="t" /><span>繁体（OpenCC 标准）</span></label>
+                <label class="choice"><input type="radio" name="traditionalVariant" value="tw" /><span>台湾正体</span></label>
+                <label class="choice"><input type="radio" name="traditionalVariant" value="twp" /><span>台湾正体及台湾用词</span></label>
+                <label class="choice"><input type="radio" name="traditionalVariant" value="hk" /><span>香港繁体</span></label>
+              </div>
+              <p class="group-note plain">每部词典标题右侧的“原 / 简 / 繁”切换释义的写法。点“繁”时默认转成这里选的繁体，也可以用它旁边的箭头给某部词典单独选择。</p>
             </fieldset>
             <fieldset class="group wide">
               <legend>查词操作</legend>
