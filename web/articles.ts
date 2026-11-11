@@ -198,7 +198,6 @@ function show(result: LookupResult, fromHistory = false): void {
   home.hidden = true;
   results.hidden = false;
   content.scrollTop = 0;
-  void call('window.title', { word: result.word });
   onWordShown(result.word, fromHistory);
   const redirected = result.word.toLowerCase() !== result.query.toLowerCase();
   const scoped = scopeIds().length ? ` · 仅查 ${scopeIds().length} 部词典` : '';
@@ -279,7 +278,6 @@ export function showHome(): void {
   home.hidden = false;
   jump.innerHTML = '';
   jump.hidden = true;
-  void call('window.title', { word: '' });
   renderHome();
 }
 

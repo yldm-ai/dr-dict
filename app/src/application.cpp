@@ -229,13 +229,6 @@ void Application::receive(const Json &request)
             webview_.send({{"id", id}, {"result", true}});
             return;
         }
-        if (method == "window.title")
-        {
-            auto word = trim(params.value("word", std::string()));
-            window_.set_title(word.empty() ? L"DR Dict" : widen(word) + L" — DR Dict");
-            webview_.send({{"id", id}, {"result", true}});
-            return;
-        }
         if (method == "window.zoom")
         {
             // Browser zoom steps (Chromium's), for Ctrl +, Ctrl − and Ctrl 0.
