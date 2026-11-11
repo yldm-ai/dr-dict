@@ -31,6 +31,7 @@ function render(): void {
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input[type=radio]'))
     input.checked = String(state.settings[input.name as keyof Settings]) === input.value;
   $<HTMLInputElement>('invert-articles').checked = state.settings.invertArticles;
+  $<HTMLInputElement>('scan-popup').checked = state.settings.scanPopup;
   const percent = Math.round(state.settings.volume * 100);
   $<HTMLInputElement>('volume').value = String(percent);
   $<HTMLInputElement>('volume').style.setProperty('--fill', `${percent}%`);
@@ -194,6 +195,7 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
     const input = event.target as HTMLInputElement;
     if (input.type === 'radio' && input.checked) void save({ [input.name]: input.value } as Partial<Settings>);
     else if (input.id === 'invert-articles') void save({ invertArticles: input.checked });
+    else if (input.id === 'scan-popup') void save({ scanPopup: input.checked });
     else if (input.id === 'chinese-conversion') void save({ chineseConversion: input.checked });
     else if (input.id === 'volume') void save({ volume: Number(input.value) / 100 });
   });

@@ -35,6 +35,8 @@ export type Settings = {
   backgroundImage: string;
   backgroundOpacity: number; // 0–1
   backgroundBlur: number; // CSS px
+  // Ctrl+C+C anywhere opens the lookup popup.
+  scanPopup: boolean;
   shell: 'mica' | 'direct2d';
   invertArticles: boolean;
   articleWidth: 'narrow' | 'comfortable' | 'wide';
@@ -58,6 +60,7 @@ export const state = {
     backgroundImage: '',
     backgroundOpacity: 0.35,
     backgroundBlur: 0,
+    scanPopup: true,
     shell: 'mica',
     invertArticles: true,
     articleWidth: 'comfortable',

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://dict.dr-dict.local data:; frame-src https://dict.dr-dict.local; connect-src 'self'; object-src 'none'"
+    />
+    <link rel="icon" href="data:," />
+    <title>DR Dict</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./popup.css" />
+    <script type="module" src="./popup.ts"></script>
+  </head>
+  <body class="popup-page">
+    <div class="popup">
+      <!-- The title bar drags the popup (app-region: drag); its buttons opt out. -->
+      <header class="popup-bar">
+        <button id="popup-back" class="popup-icon" type="button" title="后退 (Alt ←)" disabled><span data-icon="arrow-left"></span></button>
+        <button id="popup-forward" class="popup-icon" type="button" title="前进 (Alt →)" disabled><span data-icon="arrow-right"></span></button>
+        <span class="popup-drag"></span>
+        <button id="popup-main" class="popup-icon" type="button" title="在主窗口中查看"><span data-icon="open-main"></span></button>
+        <button id="popup-pin" class="popup-icon" type="button" title="固定" aria-pressed="false"><span data-icon="pin"></span></button>
+        <button id="popup-close" class="popup-icon" type="button" title="关闭 (Esc)"><span data-icon="x"></span></button>
+      </header>
+      <div class="popup-search-row">
+        <form id="popup-form" class="popup-search" autocomplete="off">
+          <span data-icon="search"></span>
+          <input id="popup-input" type="text" spellcheck="false" aria-label="查找单词" />
+        </form>
+        <button id="popup-favorite" class="popup-icon favorite-button" type="button" title="收藏 (Ctrl D)" aria-pressed="false" disabled>
+          <span data-icon="star"></span>
+        </button>
+      </div>
+      <div class="popup-body">
+        <main id="popup-content" class="popup-content"></main>
+        <!-- The same contents rail as the main window (see .toc in styles.css). -->
+        <nav id="popup-jump" class="toc" aria-label="跳转到词典" hidden></nav>
+      </div>
+    </div>
+    <div id="toast" class="toast" popover="manual" role="status"></div>
+  </body>
+</html>

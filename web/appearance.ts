@@ -84,13 +84,18 @@ function resolve(variable: string): string {
 const probe = document.createElement('span');
 probe.hidden = true;
 let lastChrome = '';
+// The main window colours its title bar; the Ctrl+C+C popup colours the edge around its WebView.
+let chromeMethod = 'window.chrome';
+export function setChromeMethod(method: string): void {
+  chromeMethod = method;
+}
 function syncWindowChrome(dark: boolean): void {
   if (!probe.isConnected) document.body.append(probe);
   const chrome = { dark, background: resolve('--bg'), text: resolve('--text'), hover: resolve('--hover') };
   const signature = JSON.stringify(chrome);
   if (signature === lastChrome || !chrome.background) return;
   lastChrome = signature;
-  void call('window.chrome', chrome).catch(() => {});
+  void call(chromeMethod, chrome).catch(() => {});
 }
 /** The native side resets its colours when Windows switches theme; send them again. */
 export function resendWindowChrome(): void {

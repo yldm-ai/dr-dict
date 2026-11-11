@@ -43,8 +43,26 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
 
 因为文章文档的基址就是 `/<id>/`，词典里的相对 `src/href` 无需改写即可命中资源；各词典 CSS 天然隔离。`frame.js` 通过 `postMessage` 把高度、`entry://` 查询、外链、锚点滚动和快捷键交给主界面（主界面校验 `event.origin`）。
 
+## Ctrl+C+C 弹窗
+
+- **热键**（`app/src/copy_hotkey.cpp`）：
+  - 参考 GoldenDict-ng `hotkey/winhotkeywrapper.cc` 的思路，独立实现。
+  - 用 `WH_KEYBOARD_LL` 钩子观察按键，而不用 RegisterHotKey 加 SendInput：后者在前台是管理员程序时会被 UIPI 拦住，表现为 Ctrl+C 失灵。
+  - 第一次 Ctrl+C 原样放行，让前台程序完成复制；500 ms 内的第二次 Ctrl+C 会被吞掉，并触发弹窗。
+  - 按住 C 产生的自动重复不算第二次。
+- **弹窗窗口**（`app/src/popup.cpp`）：
+  - 无边框、可调整大小（WebView 四周留 5 DIP 的原生缩放边），没有所属窗口，因此主窗口最小化时也能弹出。
+  - 定位方式与自动关闭规则参考 GoldenDict-ng 的 ScanPopup，均为独立实现。
+- **弹窗页面**：拥有自己的 WebView（`popup.html`）。
+  - 原生端读取剪贴板后发送 `popup-lookup` 事件；页面查询并渲染完成后，再请求 `popup.show`，因此不会先闪出旧内容。
+- **置顶与 uiAccess**：做法沿用 MSIME-Windows（`windows_webview2.cpp`）的经验。
+  - 在 uiAccess 进程里，宿主窗口如果在 WebView2 控制器创建之前就已是 TOPMOST，创建会以 E_INVALIDARG 失败（WebView2Feedback #486）。
+  - 因此弹窗创建时不置顶，等页面导航完成 1 秒后才设为 TOPMOST。
+  - 每次移动、显示或切换置顶层级后，都调用 `NotifyParentWindowPositionChanged`。
+  - 隐藏和显示时同步设置控制器的 `IsVisible`；不这样做，再次显示时只会看到旧的空白帧。
+
 ## 安全边界
 
-- 主框架只允许导航到 `index.html`；子框架只允许 `dict.dr-dict.local`；禁止新窗口。
-- 原生端只接受来自 `index.html` 的消息；外链仅限 http/https/mailto。
+- 每个 WebView 的主框架只允许导航到它自己的页面（主窗口 `index.html`，弹窗 `popup.html`）；子框架只允许 `dict.dr-dict.local`；禁止新窗口。
+- 原生端只接受来自这两个页面的消息，并把回复发回给发出请求的 WebView；外链仅限 http/https/mailto。
 - 词条 iframe `sandbox="allow-scripts allow-same-origin"`，与界面不同源。

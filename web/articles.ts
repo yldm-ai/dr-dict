@@ -6,9 +6,8 @@ import {
   effectiveTheme,
   publish,
   state,
-  traditionalNames,
-  type TraditionalVariant,
 } from './state.ts';
+import { initScriptSwitch, scriptQuery, scriptSwitch } from './script-switch.ts';
 import { speak, stopSpeaking } from './speech.ts';
 import { scopeIds } from './scope.ts';
 import { hideContextMenu, showContextMenu } from './context-menu.ts';
@@ -33,109 +32,10 @@ const navigation = { stack: [] as string[], index: -1 };
 let current: LookupResult | null = null;
 let sequence = 0;
 const collapsed = new Set<string>(JSON.parse(localStorage.getItem('collapsed') ?? '[]'));
-// How each dictionary's articles are written out: as written (absent), simplified ("s") or
-// traditional ("t"). The traditional standard picked for a dictionary is kept on its own, so it
-// survives switching to 原 or 简 and back; without one, 繁 uses the default from the settings.
-type ScriptChoice = { script: 'o' | 's' | 't'; variant?: TraditionalVariant };
-const scripts: Record<string, string> = JSON.parse(localStorage.getItem('scripts') ?? '{}');
-const standards: Record<string, TraditionalVariant> = JSON.parse(localStorage.getItem('traditional') ?? '{}');
-
-function scriptOf(id: string): ScriptChoice {
-  const value = state.chineseAvailable ? scripts[id] : undefined;
-  const variant = standards[id] in traditionalNames ? standards[id] : undefined;
-  return { script: value === 's' || value === 't' ? value : 'o', variant };
-}
-function setScript(id: string, choice: ScriptChoice): void {
-  if (choice.script === 'o') delete scripts[id];
-  else scripts[id] = choice.script;
-  if (choice.variant) standards[id] = choice.variant;
-  else delete standards[id];
-  localStorage.setItem('scripts', JSON.stringify(scripts));
-  localStorage.setItem('traditional', JSON.stringify(standards));
-}
-function traditionalOf(choice: ScriptChoice): TraditionalVariant {
-  return choice.variant ?? state.settings.traditionalVariant ?? 't';
-}
-
 function articleUrl(id: string, word: string, theme: string): string {
-  const choice = scriptOf(id);
-  const script =
-    choice.script === 's' ? '&script=s' : choice.script === 't' ? `&script=t&variant=${traditionalOf(choice)}` : '';
   return `${dictOrigin}/${encodeURIComponent(id)}/@article?word=${encodeURIComponent(word)}&theme=${theme}&vol=${
     state.settings.volume
-  }${script}`;
-}
-
-/** 原 / 简 / 繁 at the right of a dictionary header; the arrow beside 繁 picks the traditional standard. */
-function scriptSwitch(id: string): string {
-  if (!state.chineseAvailable) return '';
-  const choice = scriptOf(id);
-  const button = (script: ScriptChoice['script'], label: string, tip: string) =>
-    `<button class="script-option" type="button" data-script="${script}" aria-pressed="${choice.script === script}"
-       title="${tip}">${label}</button>`;
-  return `<div class="script-switch" role="group" aria-label="释义写法">
-      ${button('o', '原', '词典原文')}${button('s', '简', '转成简体')}${button('t', '繁', `转成${traditionalNames[traditionalOf(choice)]}`)}
-      <button class="script-more" type="button" aria-haspopup="menu" aria-expanded="false" title="选择繁体标准">
-        <span data-icon="chevron-down"></span>
-      </button>
-    </div>`;
-}
-
-// One menu for all headers, placed under the arrow that opened it (fixed, so later sticky headers
-// cannot cover it).
-const scriptMenu = document.createElement('div');
-scriptMenu.className = 'script-menu';
-scriptMenu.setAttribute('role', 'menu');
-scriptMenu.hidden = true;
-document.body.append(scriptMenu);
-let scriptMenuFor: HTMLButtonElement | null = null;
-
-function openScriptMenu(arrow: HTMLButtonElement): void {
-  const id = arrow.closest<HTMLElement>('.entry')?.dataset.id;
-  if (!id) return;
-  const choice = scriptOf(id);
-  const active = choice.script === 't' ? traditionalOf(choice) : null;
-  scriptMenu.innerHTML = (Object.keys(traditionalNames) as TraditionalVariant[])
-    .map(
-      (variant) => `<button class="script-menu-item" type="button" role="menuitemradio" data-variant="${variant}"
-          aria-checked="${active === variant}">
-          <span class="script-menu-check" data-icon="check"></span>
-          <span class="script-menu-name">${traditionalNames[variant]}</span>
-          ${variant === state.settings.traditionalVariant ? '<span class="script-menu-default">默认</span>' : ''}
-        </button>`,
-    )
-    .join('');
-  hydrateIcons(scriptMenu);
-  scriptMenu.hidden = false;
-  const rect = arrow.getBoundingClientRect();
-  const width = scriptMenu.offsetWidth;
-  scriptMenu.style.left = `${Math.max(8, Math.min(rect.right - width, innerWidth - width - 8))}px`;
-  scriptMenu.style.top = `${rect.bottom + 4}px`;
-  arrow.setAttribute('aria-expanded', 'true');
-  scriptMenuFor = arrow;
-}
-function closeScriptMenu(): void {
-  if (scriptMenu.hidden) return;
-  scriptMenu.hidden = true;
-  scriptMenuFor?.setAttribute('aria-expanded', 'false');
-  scriptMenuFor = null;
-}
-
-/** Shows one dictionary's article as written, simplified or traditional, reloading only its frame. */
-function applyScript(section: HTMLElement, choice: ScriptChoice): void {
-  const frame = section.querySelector('iframe');
-  if (!frame || !current) return;
-  const id = section.dataset.id!;
-  setScript(id, choice);
-  const switcher = section.querySelector('.script-switch');
-  if (switcher) {
-    switcher.outerHTML = scriptSwitch(id);
-    hydrateIcons(section.querySelector('.entry-header')!);
-  }
-  // The frame keeps its height until the converted page reports its own, so nothing jumps.
-  const url = articleUrl(id, current.word, frameTheme());
-  if (frame.src !== url) frame.src = url;
-  section.classList.remove('collapsed');
+  }${scriptQuery(id)}`;
 }
 
 export let onWordShown: (word: string, fromHistory: boolean) => void = () => {};
@@ -393,23 +293,6 @@ export function initArticles(handlers: { focusSearch: (text?: string, append?: s
       void lookup(chip.dataset.word!);
       return;
     }
-    const option = target.closest<HTMLButtonElement>('.script-option');
-    if (option) {
-      // The standard picked for this dictionary stays, whichever button is pressed.
-      const section = option.closest<HTMLElement>('.entry')!;
-      const script = option.dataset.script as ScriptChoice['script'];
-      applyScript(section, { script, variant: scriptOf(section.dataset.id!).variant });
-      return;
-    }
-    const more = target.closest<HTMLButtonElement>('.script-more');
-    if (more) {
-      if (scriptMenuFor === more) closeScriptMenu();
-      else {
-        closeScriptMenu();
-        openScriptMenu(more);
-      }
-      return;
-    }
     const toggle = target.closest('.entry-toggle');
     const section = toggle?.closest<HTMLElement>('.entry');
     if (!section) return;
@@ -420,33 +303,14 @@ export function initArticles(handlers: { focusSearch: (text?: string, append?: s
     else collapsed.delete(section.dataset.id!);
     localStorage.setItem('collapsed', JSON.stringify([...collapsed]));
   });
-  scriptMenu.addEventListener('click', (event) => {
-    const item = (event.target as HTMLElement).closest<HTMLElement>('[data-variant]');
-    const section = scriptMenuFor?.closest<HTMLElement>('.entry');
-    if (!item || !section) return;
-    const variant = item.dataset.variant as TraditionalVariant;
-    closeScriptMenu();
-    // Picking the default standard follows the setting from then on.
-    applyScript(section, { script: 't', variant: variant === state.settings.traditionalVariant ? undefined : variant });
+  // 原 / 简 / 繁: reload only that dictionary's frame. It keeps its height until the converted
+  // page reports its own, so nothing jumps.
+  initScriptSwitch(results, content, (section) => {
+    const frame = section.querySelector('iframe');
+    if (!frame || !current) return;
+    const url = articleUrl(section.dataset.id!, current.word, frameTheme());
+    if (frame.src !== url) frame.src = url;
   });
-  document.addEventListener('mousedown', (event) => {
-    if (!(event.target as HTMLElement).closest('.script-menu, .script-more')) closeScriptMenu();
-  });
-  document.addEventListener(
-    'keydown',
-    (event) => {
-      if (event.key === 'Escape' && scriptMenuFor) {
-        event.stopPropagation();
-        const arrow = scriptMenuFor;
-        closeScriptMenu();
-        arrow.focus();
-      }
-    },
-    true,
-  );
-  content.addEventListener('scroll', closeScriptMenu, { passive: true });
-  window.addEventListener('resize', closeScriptMenu);
-  window.addEventListener('blur', closeScriptMenu); // e.g. a click into an article frame
   home.addEventListener('click', (event) => {
     const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-word]');
     if (chip) void lookup(chip.dataset.word!);

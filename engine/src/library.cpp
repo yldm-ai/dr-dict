@@ -261,6 +261,10 @@ Json Library::default_settings()
             {"backgroundImage", ""},
             {"backgroundOpacity", 0.35},
             {"backgroundBlur", 0},
+            // Ctrl+C+C anywhere in Windows opens a lookup popup, sized as the user last left it (DIPs).
+            {"scanPopup", true},
+            {"popupWidth", 360},
+            {"popupHeight", 420},
             // Page zoom of the window (Ctrl+wheel, Ctrl +/−/0), kept across restarts.
             {"zoom", 1.0},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
@@ -334,6 +338,12 @@ Json Library::save_settings(const Json &patch)
     if (patch.contains("backgroundBlur") && patch["backgroundBlur"].is_number())
         current["backgroundBlur"] = std::clamp(patch["backgroundBlur"].get<int>(), 0, 40);
     // "backgroundImage" is set only by set_background_image / clear_background_image.
+    if (patch.contains("scanPopup") && patch["scanPopup"].is_boolean())
+        current["scanPopup"] = patch["scanPopup"];
+    if (patch.contains("popupWidth") && patch["popupWidth"].is_number())
+        current["popupWidth"] = std::clamp(patch["popupWidth"].get<int>(), 280, 1600);
+    if (patch.contains("popupHeight") && patch["popupHeight"].is_number())
+        current["popupHeight"] = std::clamp(patch["popupHeight"].get<int>(), 200, 1400);
     if (patch.contains("shell") && patch["shell"].is_string() && shells.count(patch["shell"]))
         current["shell"] = patch["shell"];
     if (patch.contains("articleWidth") && patch["articleWidth"].is_string() && widths.count(patch["articleWidth"]))

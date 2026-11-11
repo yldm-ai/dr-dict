@@ -19,6 +19,8 @@ const paths: Record<string, string> = {
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.75v.01"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  pin: '<path d="M9.5 4.5h5l-.8 5.2 3.3 3.3H7l3.3-3.3z"/><path d="M12 13v6.5"/>',
+  'open-main': '<path d="M13.5 4.5h6v6M19.5 4.5l-8 8"/><path d="M17.5 13.5v4a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h4"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5v-2a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
   alert: '<path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4.5M12 17.25v.01"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',

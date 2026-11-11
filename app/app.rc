@@ -1,4 +1,5 @@
 #include <windows.h>
 #include "resource.h"
 IDI_DR_DICT ICON "../resources/dr-dict.ico"
-1 RT_MANIFEST "app.manifest"
+// Generated from app.manifest.in into the build directory (uiAccess per DR_DICT_UIACCESS).
+1 RT_MANIFEST "dr-dict.manifest"

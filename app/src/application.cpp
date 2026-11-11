@@ -3,6 +3,7 @@
 #include "dr/text.h"
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <cwctype>
 #include <stdexcept>
 namespace dr
 {
@@ -86,13 +87,13 @@ Application::Application(fs::path root, fs::path assets, std::vector<fs::path> f
     library_.set_opencc_dir(assets_.parent_path() / "opencc");
 }
 
-void Application::reply(const Json &id, Json result)
+void Application::reply(WebView &to, const Json &id, Json result)
 {
-    window_.post([this, id, result = std::move(result)] { webview_.send({{"id", id}, {"result", result}}); });
+    window_.post([&to, id, result = std::move(result)] { to.send({{"id", id}, {"result", result}}); });
 }
-void Application::reply_error(const Json &id, const std::string &error)
+void Application::reply_error(WebView &to, const Json &id, const std::string &error)
 {
-    window_.post([this, id, error] { webview_.send({{"id", id}, {"error", error}}); });
+    window_.post([&to, id, error] { to.send({{"id", id}, {"error", error}}); });
 }
 
 void Application::apply_settings(const Json &s)
@@ -101,6 +102,118 @@ void Application::apply_settings(const Json &s)
     window_.set_style(shell == "direct2d" ? ShellStyle::Direct2D : ShellStyle::Mica);
     // The page follows with the exact colours (window.chrome) once it has applied them.
     window_.set_theme(theme_mode(s.value("theme", std::string("system"))));
+    apply_hotkey(s);
+}
+
+void Application::apply_hotkey(const Json &s)
+{
+    if (s.value("scanPopup", true))
+    {
+        if (!hotkey_.installed())
+            hotkey_.install([this] { window_.post([this] { copied_twice(); }); });
+    }
+    else
+    {
+        hotkey_.uninstall();
+        popup_.hide();
+    }
+}
+
+namespace
+{
+// The clipboard's text, with whitespace runs collapsed; empty when it holds none. Another
+// application may still have the clipboard open right after its copy, so opening is retried.
+std::string clipboard_text()
+{
+    bool open = false;
+    for (int attempt = 0; attempt < 10 && !(open = OpenClipboard(nullptr)); ++attempt)
+        Sleep(20);
+    if (!open)
+        return {};
+    std::wstring text;
+    if (HANDLE data = GetClipboardData(CF_UNICODETEXT))
+        if (auto *chars = static_cast<const wchar_t *>(GlobalLock(data)))
+        {
+            text.assign(chars, wcsnlen(chars, GlobalSize(data) / sizeof(wchar_t)));
+            GlobalUnlock(data);
+        }
+    CloseClipboard();
+    std::wstring collapsed;
+    for (wchar_t c : text)
+    {
+        const bool space = iswspace(c) || c == 0x3000;
+        if (space && (collapsed.empty() || collapsed.back() == L' '))
+            continue;
+        collapsed += space ? L' ' : c;
+    }
+    while (!collapsed.empty() && collapsed.back() == L' ')
+        collapsed.pop_back();
+    if (collapsed.size() > 256) // a paragraph, not a word: the popup still opens with its start
+        collapsed.resize(256);
+    return narrow(collapsed);
+}
+} // namespace
+
+void Application::copied_twice()
+{
+    if (!popup_view_.ready())
+        return;
+    // Ctrl+C+C inside DR Dict itself is only a copy.
+    DWORD process = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &process);
+    if (process == GetCurrentProcessId() && GetForegroundWindow() != popup_.handle())
+        return;
+    GetCursorPos(&popup_cursor_);
+    queries_.enqueue([this] {
+        // The first Ctrl+C was delivered before ours; give the application a moment to put
+        // the selection on the clipboard.
+        Sleep(80);
+        auto word = clipboard_text();
+        if (word.empty())
+            return;
+        Json event = {{"event", "popup-lookup"},
+                      {"word", word},
+                      {"settings", library_.settings()},
+                      {"dictionaries", library_.list()},
+                      {"favorites", library_.favorites()},
+                      {"systemDark", Window::system_dark()},
+                      {"chineseAvailable", library_.chinese_available()}};
+        // The page looks the word up, renders, then asks for popup.show.
+        window_.post([this, event] { popup_view_.send(event); });
+    });
+}
+
+void Application::create_popup(HINSTANCE instance, const Json &settings)
+{
+    if (!popup_.create(instance, window_.handle()))
+        return;
+    popup_.set_size(settings.value("popupWidth", 360), settings.value("popupHeight", 420));
+    popup_.on_bounds = [this](RECT bounds) { popup_view_.resize(bounds); };
+    popup_.on_moved = [this] { popup_view_.notify_moved(); };
+    // A hidden host's WebView is told it is hidden and shown again with the host, which makes it
+    // paint a fresh frame (as MSIME-Windows re-asserts visibility for its small windows).
+    popup_.on_shown = [this] { popup_view_.set_visible(true); };
+    popup_.on_focus = [this] { popup_view_.focus(); };
+    popup_.on_hidden = [this] {
+        popup_view_.set_visible(false);
+        popup_view_.send({{"event", "popup-hidden"}});
+    };
+    popup_.on_resized = [this](int width, int height) {
+        queries_.enqueue([this, width, height] { library_.save_settings({{"popupWidth", width}, {"popupHeight", height}}); });
+    };
+    popup_view_.on_message = [this](const Json &request) { receive(request, popup_view_); };
+    popup_view_.on_resource = webview_.on_resource;
+    popup_view_.on_error = [](const std::wstring &) {}; // the main window reports WebView2 problems
+    // TOPMOST only once the WebView is up and has settled (see Popup): pinning a host while its
+    // controller is created or bringing up its first frames breaks it under uiAccess.
+    popup_view_.on_ready = [this] {
+        popup_view_.set_visible(false);
+        popup_.schedule_topmost(1000);
+    };
+    RECT client{};
+    GetClientRect(popup_.handle(), &client);
+    popup_view_.resize(client);
+    popup_view_.create(popup_.handle(), assets_, library_.root(), app_popup, true);
 }
 
 fs::path Application::pick_image()
@@ -190,13 +303,13 @@ void Application::import(const Json &id, std::vector<fs::path> paths, bool resca
                 webview_.send(event);
             });
             if (!id.is_null())
-                reply(id, result);
+                reply(webview_, id, result);
         }
         catch (const std::exception &e)
         {
             window_.post([this] { webview_.send({{"event", "import-done"}, {"errors", Json::array()}}); });
             if (!id.is_null())
-                reply_error(id, e.what());
+                reply_error(webview_, id, e.what());
         }
     });
 }
@@ -215,7 +328,7 @@ std::vector<std::string> scope_of(const Json &params)
 }
 } // namespace
 
-void Application::receive(const Json &request)
+void Application::receive(const Json &request, WebView &from)
 {
     if (!request.is_object() || !request.contains("id") || !request["id"].is_number_unsigned() ||
         !request.contains("method") || !request["method"].is_string())
@@ -234,7 +347,7 @@ void Application::receive(const Json &request)
             else if (auto folder = pick_folder(); !folder.empty())
                 paths.push_back(folder);
             if (paths.empty())
-                webview_.send({{"id", id}, {"result", {{"cancelled", true}}}});
+                from.send({{"id", id}, {"result", {{"cancelled", true}}}});
             else
                 import(id, std::move(paths));
             return;
@@ -244,17 +357,17 @@ void Application::receive(const Json &request)
             auto file = pick_image();
             if (file.empty())
             {
-                webview_.send({{"id", id}, {"result", {{"cancelled", true}}}});
+                from.send({{"id", id}, {"result", {{"cancelled", true}}}});
                 return;
             }
-            queries_.enqueue([this, id, file] {
+            queries_.enqueue([this, &from, id, file] {
                 try
                 {
-                    reply(id, library_.set_background_image(file));
+                    reply(from, id, library_.set_background_image(file));
                 }
                 catch (const std::exception &e)
                 {
-                    reply_error(id, e.what());
+                    reply_error(from, id, e.what());
                 }
             });
             return;
@@ -277,7 +390,7 @@ void Application::receive(const Json &request)
             };
             window_.set_caption_colors(params.value("dark", false), color("background", 0xffffff),
                                        color("text", 0x37352f), color("hover", 0xefefed));
-            webview_.send({{"id", id}, {"result", true}});
+            from.send({{"id", id}, {"result", true}});
             return;
         }
         if (method == "dict.rescan")
@@ -291,7 +404,7 @@ void Application::receive(const Json &request)
             if (!url.starts_with("https://") && !url.starts_with("http://") && !url.starts_with("mailto:"))
                 throw std::runtime_error("只能打开网页链接");
             ShellExecuteW(window_.handle(), L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-            webview_.send({{"id", id}, {"result", true}});
+            from.send({{"id", id}, {"result", true}});
             return;
         }
         if (method == "window.zoom")
@@ -320,13 +433,51 @@ void Application::receive(const Json &request)
                         next = s;
             }
             webview_.set_zoom(next);
-            webview_.send({{"id", id}, {"result", next}});
+            from.send({{"id", id}, {"result", next}});
             return;
         }
         if (method == "window.dim")
         {
             window_.set_dimmed(params.value("dimmed", false));
-            webview_.send({{"id", id}, {"result", true}});
+            from.send({{"id", id}, {"result", true}});
+            return;
+        }
+        if (method.starts_with("popup."))
+        {
+            Json result = true;
+            if (method == "popup.show")
+                popup_.show_near(popup_cursor_); // the page has rendered the new lookup
+            else if (method == "popup.hide")
+                popup_.hide();
+            else if (method == "popup.pin")
+            {
+                popup_.set_pinned(params.value("pinned", false));
+                result = popup_.pinned();
+            }
+            else if (method == "popup.chrome")
+            {
+                // The edge around the popup's WebView matches the page background.
+                auto text = params.value("background", std::string("#ffffff"));
+                UINT32 background = 0xffffff;
+                if (text.size() == 7 && text[0] == '#')
+                    background = static_cast<UINT32>(std::stoul(text.substr(1), nullptr, 16));
+                popup_.set_colors(background, params.value("dark", false));
+            }
+            else if (method == "popup.openMain")
+            {
+                // Continue in the main window: restore it, bring it forward and look the word up.
+                auto word = params.value("word", std::string());
+                if (!popup_.pinned())
+                    popup_.hide();
+                if (IsIconic(window_.handle()))
+                    ShowWindow(window_.handle(), SW_RESTORE);
+                SetForegroundWindow(window_.handle());
+                if (!word.empty())
+                    webview_.send({{"event", "lookup-word"}, {"word", word}});
+            }
+            else
+                throw std::runtime_error("未知命令: " + method);
+            from.send({{"id", id}, {"result", result}});
             return;
         }
         if (method == "window.close")
@@ -337,12 +488,12 @@ void Application::receive(const Json &request)
     }
     catch (const std::exception &e)
     {
-        webview_.send({{"id", id}, {"error", e.what()}});
+        from.send({{"id", id}, {"error", e.what()}});
         return;
     }
     const bool writes_index = method == "dict.remove" || method == "dict.reindex" || method == "dict.restore";
     auto &worker = writes_index ? imports_ : queries_;
-    worker.enqueue([this, id, method, params] {
+    worker.enqueue([this, &from, id, method, params] {
         try
         {
             Json result;
@@ -373,7 +524,14 @@ void Application::receive(const Json &request)
                 auto word = params.at("word").get<std::string>();
                 result = library_.lookup(word, scope_of(params));
                 if (!result["results"].empty() && params.value("remember", true))
+                {
                     result["history"] = library_.remember(result.value("word", word));
+                    // A lookup in the popup also lands in the main window's recent list.
+                    if (&from == &popup_view_)
+                        window_.post([this, history = result["history"]] {
+                            webview_.send({{"event", "history"}, {"history", history}});
+                        });
+                }
             }
             else if (method == "history.clear")
                 result = library_.clear_history();
@@ -382,7 +540,14 @@ void Application::receive(const Json &request)
             else if (method == "history.remove")
                 result = library_.forget_word(params.at("word").get<std::string>());
             else if (method == "favorites.toggle")
+            {
                 result = library_.toggle_favorite(params.at("word").get<std::string>());
+                // The popup's star updates the main window's favorites as well.
+                if (&from == &popup_view_)
+                    window_.post([this, favorites = result] {
+                        webview_.send({{"event", "favorites"}, {"favorites", favorites}});
+                    });
+            }
             else if (method == "dict.list")
                 result = library_.list();
             else if (method == "dict.folders")
@@ -422,11 +587,11 @@ void Application::receive(const Json &request)
             }
             else
                 throw std::runtime_error("未知命令: " + method);
-            reply(id, std::move(result));
+            reply(from, id, std::move(result));
         }
         catch (const std::exception &e)
         {
-            reply_error(id, e.what());
+            reply_error(from, id, e.what());
         }
     });
 }
@@ -508,7 +673,7 @@ int Application::run(HINSTANCE instance)
                        {"width", (button.right - button.left) * scale}});
     };
     window_.set_theme(theme_mode(settings.value("theme", std::string("system"))));
-    webview_.on_message = [this](const Json &request) { receive(request); };
+    webview_.on_message = [this](const Json &request) { receive(request, webview_); };
     webview_.on_resource = [this](const std::wstring &uri, std::function<void(ResourceReply)> respond) {
         resource(uri, std::move(respond));
     };
@@ -523,6 +688,10 @@ int Application::run(HINSTANCE instance)
     };
     webview_.resize(window_.content_bounds());
     webview_.create(window_.handle(), assets_, library_.root());
+    // The popup is created hidden at start-up, so its WebView is ready (and the host TOPMOST)
+    // before the first Ctrl+C+C.
+    create_popup(instance, settings);
+    apply_hotkey(settings);
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0)
     {

@@ -1,6 +1,8 @@
 #pragma once
 #include "dr/library.h"
 #include "dr/window.h"
+#include "copy_hotkey.h"
+#include "popup.h"
 #include "webview.h"
 #include <condition_variable>
 #include <queue>
@@ -30,9 +32,14 @@ class Application
     int run(HINSTANCE instance);
 
   private:
-    void receive(const Json &request);
-    void reply(const Json &id, Json result);
-    void reply_error(const Json &id, const std::string &error);
+    // Requests come from the main window's page or the popup's; answers go back to the sender.
+    void receive(const Json &request, WebView &from);
+    void reply(WebView &to, const Json &id, Json result);
+    void reply_error(WebView &to, const Json &id, const std::string &error);
+    // Ctrl+C+C lookup popup.
+    void create_popup(HINSTANCE instance, const Json &settings);
+    void apply_hotkey(const Json &settings);
+    void copied_twice();
     void resource(const std::wstring &uri, std::function<void(ResourceReply)> respond);
     std::vector<fs::path> pick_files();
     fs::path pick_folder();
@@ -41,6 +48,10 @@ class Application
     void apply_settings(const Json &settings);
     Window window_;
     WebView webview_;
+    Popup popup_;
+    WebView popup_view_;
+    CopyHotkey hotkey_;
+    POINT popup_cursor_{};
     Library library_;
     fs::path assets_;
     std::vector<fs::path> initial_files_;

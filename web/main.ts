@@ -360,6 +360,22 @@ async function bootstrap(): Promise<void> {
     applyTheme();
     refresh();
   });
+  // From the Ctrl+C+C popup: "在主窗口中查看", and lookups it added to the history.
+  on('lookup-word', ({ word }) => {
+    if (typeof word !== 'string' || !word.trim()) return;
+    focusSearch(word);
+    void lookup(word);
+  });
+  on('history', ({ history }) => {
+    if (!Array.isArray(history)) return;
+    state.history = history;
+    publish('history');
+  });
+  on('favorites', ({ favorites }) => {
+    if (!Array.isArray(favorites)) return;
+    state.favorites = favorites;
+    publish('favorites');
+  });
   on('system-theme', ({ dark }) => {
     setSystemDark(Boolean(dark));
     // The native title bar went back to its plain light/dark colours; restore the scheme's.

@@ -41,6 +41,24 @@ void WebView::resize(RECT bounds)
     if (controller_)
         controller_->put_Bounds(bounds);
 }
+void WebView::focus()
+{
+    if (controller_)
+        controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+}
+void WebView::set_visible(bool visible)
+{
+    if (controller_)
+        controller_->put_IsVisible(visible ? TRUE : FALSE);
+}
+void WebView::notify_moved()
+{
+    if (controller_)
+    {
+        controller_->put_Bounds(bounds_);
+        controller_->NotifyParentWindowPositionChanged();
+    }
+}
 void WebView::set_zoom(double factor)
 {
     const double next = std::clamp(factor, 0.25, 5.0);
@@ -57,8 +75,11 @@ void WebView::send(const Json &message)
         view_->PostWebMessageAsJson(widen(message.dump(-1, ' ', false, Json::error_handler_t::replace)).c_str());
 }
 
-void WebView::create(HWND window, const fs::path &web_root, const fs::path &data_root)
+void WebView::create(HWND window, const fs::path &web_root, const fs::path &data_root, const wchar_t *page,
+                     bool drag_regions)
 {
+    page_ = page;
+    drag_regions_ = drag_regions;
     auto hr = CreateCoreWebView2EnvironmentWithOptions(
         nullptr, (data_root / "webview-profile").c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
@@ -159,6 +180,10 @@ void WebView::configure(const fs::path &web_root)
     // F5, Ctrl+F, Ctrl+P and similar browser shortcuts do not belong to a dictionary window.
     if (SUCCEEDED(settings.As(&settings3)))
         settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
+    // CSS app-region: drag in the page moves the host window (the borderless popup's title row).
+    ComPtr<ICoreWebView2Settings9> settings9;
+    if (drag_regions_ && SUCCEEDED(settings.As(&settings9)))
+        settings9->put_IsNonClientRegionSupportEnabled(TRUE);
     ComPtr<ICoreWebView2Settings5> settings5;
     if (SUCCEEDED(settings.As(&settings5)))
         settings5->put_IsPinchZoomEnabled(FALSE);
@@ -201,7 +226,7 @@ void WebView::configure(const fs::path &web_root)
                 args->get_WebMessageAsJson(&raw);
                 auto origin = take(source);
                 auto text = narrow(take(raw));
-                if (origin != app_index || text.size() > 256 * 1024)
+                if (origin != page_ || text.size() > 256 * 1024)
                     return S_OK;
                 try
                 {
@@ -217,10 +242,10 @@ void WebView::configure(const fs::path &web_root)
         &token);
     view_->add_NavigationStarting(
         Callback<ICoreWebView2NavigationStartingEventHandler>(
-            [](ICoreWebView2 *, ICoreWebView2NavigationStartingEventArgs *args) -> HRESULT {
+            [this](ICoreWebView2 *, ICoreWebView2NavigationStartingEventArgs *args) -> HRESULT {
                 LPWSTR uri = nullptr;
                 args->get_Uri(&uri);
-                if (take(uri) != app_index)
+                if (take(uri) != page_)
                     args->put_Cancel(TRUE);
                 return S_OK;
             })
@@ -277,6 +302,19 @@ void WebView::configure(const fs::path &web_root)
             })
             .Get(),
         &token);
-    view_->Navigate(app_index);
+    view_->add_NavigationCompleted(
+        Callback<ICoreWebView2NavigationCompletedEventHandler>(
+            [this](ICoreWebView2 *, ICoreWebView2NavigationCompletedEventArgs *) -> HRESULT {
+                if (!ready_)
+                {
+                    ready_ = true;
+                    if (on_ready)
+                        on_ready();
+                }
+                return S_OK;
+            })
+            .Get(),
+        &token);
+    view_->Navigate(page_.c_str());
 }
 } // namespace dr

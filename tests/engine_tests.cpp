@@ -309,6 +309,10 @@ int main()
         CHECK(library.save_settings({{"backgroundColor", ""}})["backgroundColor"] == "");
         auto look = library.save_settings({{"backgroundOpacity", 2}, {"backgroundBlur", 99}, {"backgroundImage", "../x"}});
         CHECK(look["backgroundOpacity"] == 1.0 && look["backgroundBlur"] == 40 && look["backgroundImage"] == "");
+        // Ctrl+C+C popup: on by default; its size is clamped.
+        CHECK(Library::default_settings()["scanPopup"] == true);
+        auto popup = library.save_settings({{"scanPopup", false}, {"popupWidth", 10}, {"popupHeight", 9999}});
+        CHECK(popup["scanPopup"] == false && popup["popupWidth"] == 280 && popup["popupHeight"] == 1400);
         library.save_settings({{"backgroundBlur", 12}});
         CHECK(library.settings()["backgroundBlur"] == 12); // read back from settings.json
         write_file(dicts / "wall.PNG", "PNGDATA");
