@@ -23,8 +23,18 @@ export const traditionalNames: Record<TraditionalVariant, string> = {
   twp: '台湾正体及台湾用词',
   hk: '香港繁体',
 };
+// Colour schemes: following Windows, plain light and dark, and built-in palettes (styles.css).
+export type Theme = 'system' | 'light' | 'dark' | 'paper' | 'green' | 'gray' | 'night' | 'mocha';
+export const darkThemes = new Set<Theme>(['dark', 'night', 'mocha']);
 export type Settings = {
-  theme: 'light' | 'dark' | 'system';
+  theme: Theme;
+  // "" uses the scheme's own colour; otherwise "#rrggbb".
+  backgroundColor: string;
+  accentColor: string;
+  // File name under <data>/backgrounds, served at https://dict.dr-dict.local/@background/<name>.
+  backgroundImage: string;
+  backgroundOpacity: number; // 0–1
+  backgroundBlur: number; // CSS px
   shell: 'mica' | 'direct2d';
   invertArticles: boolean;
   articleWidth: 'narrow' | 'comfortable' | 'wide';
@@ -43,6 +53,11 @@ export const state = {
   dictionaries: [] as Dictionary[],
   settings: {
     theme: 'system',
+    backgroundColor: '',
+    accentColor: '',
+    backgroundImage: '',
+    backgroundOpacity: 0.35,
+    backgroundBlur: 0,
     shell: 'mica',
     invertArticles: true,
     articleWidth: 'comfortable',
@@ -81,9 +96,28 @@ export function setSystemDark(dark: boolean): void {
   systemDark = dark;
   for (const handler of systemThemeHandlers) handler();
 }
+/** Relative luminance (WCAG) of "#rrggbb". */
+export function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** The scheme in use, with "system" resolved from the Windows theme. */
+export function activeTheme(): Exclude<Theme, 'system'> {
+  const theme = state.settings.theme;
+  if (theme === 'system') return systemDark ? 'dark' : 'light';
+  return theme;
+}
+/**
+ * Light or dark for text, articles and the window: a custom background colour decides by its
+ * own brightness (light text on a dark colour), otherwise the scheme does.
+ */
 export function effectiveTheme(): 'light' | 'dark' {
-  if (state.settings.theme === 'system') return systemDark ? 'dark' : 'light';
-  return state.settings.theme;
+  const custom = state.settings.backgroundColor;
+  if (/^#[0-9a-f]{6}$/i.test(custom)) return luminance(custom) < 0.18 ? 'dark' : 'light';
+  return darkThemes.has(activeTheme()) ? 'dark' : 'light';
 }
 export function onSystemThemeChange(handler: () => void): void {
   systemThemeHandlers.add(handler);

@@ -115,11 +115,50 @@
 
         <section class="tab-panel" role="tabpanel" data-panel="interface" hidden>
           <div class="groups">
-            <fieldset class="group">
-              <legend>主题</legend>
-              <label class="choice"><input type="radio" name="theme" value="light" /><span>浅色</span></label>
-              <label class="choice"><input type="radio" name="theme" value="dark" /><span>深色</span></label>
-              <label class="choice"><input type="radio" name="theme" value="system" /><span>跟随系统</span></label>
+            <fieldset class="group wide">
+              <legend>配色</legend>
+              <div id="theme-grid" class="theme-grid" role="group" aria-label="配色"></div>
+              <p class="group-note tight">选择配色会清除下面的自定义背景色和主题色。</p>
+            </fieldset>
+            <fieldset class="group wide">
+              <legend>背景与颜色</legend>
+              <div class="appearance-row">
+                <span>背景颜色</span>
+                <div class="appearance-controls">
+                  <button id="bg-color" class="button small color-button" type="button"><span class="color-chip"></span><span class="color-text"></span></button>
+                  <button id="bg-color-reset" class="button small ghost" type="button">还原</button>
+                </div>
+              </div>
+              <div class="appearance-row">
+                <span>主题色</span>
+                <div class="appearance-controls">
+                  <button id="accent-color" class="button small color-button" type="button"><span class="color-chip"></span><span class="color-text"></span></button>
+                  <button id="accent-color-reset" class="button small ghost" type="button">还原</button>
+                </div>
+              </div>
+              <div class="appearance-row">
+                <span>背景图片</span>
+                <div class="appearance-controls">
+                  <div id="bg-image-preview" class="image-preview">无</div>
+                  <button id="bg-image-choose" class="button small" type="button">选择图片…</button>
+                  <button id="bg-image-clear" class="button small ghost" type="button">移除</button>
+                </div>
+              </div>
+              <label class="appearance-row">
+                <span>图片浓度</span>
+                <span class="volume-row">
+                  <input id="bg-opacity" class="volume-slider" type="range" min="5" max="100" step="1" aria-label="背景图片浓度" />
+                  <output id="bg-opacity-value" class="volume-value" for="bg-opacity">35%</output>
+                </span>
+              </label>
+              <label class="appearance-row">
+                <span>图片模糊</span>
+                <span class="volume-row">
+                  <input id="bg-blur" class="volume-slider" type="range" min="0" max="40" step="1" aria-label="背景图片模糊" />
+                  <output id="bg-blur-value" class="volume-value" for="bg-blur">0</output>
+                </span>
+              </label>
+              <p class="group-note plain">背景颜色较深时，界面文字会自动改用浅色。背景图片会复制到数据目录，原图移动或删除后不受影响。</p>
             </fieldset>
             <fieldset class="group">
               <legend>窗口标题栏</legend>

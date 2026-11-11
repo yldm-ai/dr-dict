@@ -299,6 +299,40 @@ int main()
         CHECK(scoped["scope"] == Json::array({mdx_id}));
         auto settings = library.save_settings({{"theme", "dark"}, {"shell", "bogus"}});
         CHECK(settings["theme"] == "dark" && settings["shell"] == "mica");
+
+        // Appearance: built-in schemes, custom colours, background image.
+        CHECK(library.save_settings({{"theme", "night"}})["theme"] == "night");
+        CHECK(library.save_settings({{"theme", "neon"}})["theme"] == "night");
+        CHECK(theme_mode("night") == "dark" && theme_mode("paper") == "light" && theme_mode("system") == "system");
+        auto colors = library.save_settings({{"backgroundColor", "#1A2b3c"}, {"accentColor", "red"}});
+        CHECK(colors["backgroundColor"] == "#1A2b3c" && colors["accentColor"] == "");
+        CHECK(library.save_settings({{"backgroundColor", ""}})["backgroundColor"] == "");
+        auto look = library.save_settings({{"backgroundOpacity", 2}, {"backgroundBlur", 99}, {"backgroundImage", "../x"}});
+        CHECK(look["backgroundOpacity"] == 1.0 && look["backgroundBlur"] == 40 && look["backgroundImage"] == "");
+        library.save_settings({{"backgroundBlur", 12}});
+        CHECK(library.settings()["backgroundBlur"] == 12); // read back from settings.json
+        write_file(dicts / "wall.PNG", "PNGDATA");
+        write_file(dicts / "notes.txt", "x");
+        bool bad_image = false;
+        try
+        {
+            library.set_background_image(dicts / "notes.txt");
+        }
+        catch (const std::exception &)
+        {
+            bad_image = true;
+        }
+        CHECK(bad_image);
+        auto first = library.set_background_image(dicts / "wall.PNG")["backgroundImage"].get<std::string>();
+        CHECK(first.ends_with(".png") && fs::exists(root / "data" / "backgrounds" / first));
+        auto image = library.background_image(first);
+        CHECK(image && image->data == "PNGDATA" && image->mime == "image/png");
+        CHECK(!library.background_image("../settings.json") && !library.background_image("other.png"));
+        auto second = library.set_background_image(dicts / "wall.PNG")["backgroundImage"].get<std::string>();
+        CHECK(second != first && !fs::exists(root / "data" / "backgrounds" / first)); // old copy removed
+        CHECK(library.clear_background_image()["backgroundImage"] == "");
+        CHECK(!fs::exists(root / "data" / "backgrounds" / second) && !library.background_image(second));
+        CHECK(fs::exists(dicts / "wall.PNG")); // the original is untouched
     }
 
     // Remembered folders: a rescan picks up new dictionaries; removed ones stay in the removed group.

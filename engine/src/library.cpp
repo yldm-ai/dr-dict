@@ -1,6 +1,7 @@
 #include "dr/library.h"
 #include "dr/text.h"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <set>
 #include <sqlite3.h>
@@ -252,6 +253,14 @@ Json Library::default_settings()
             {"scope", Json::array()},
             // Playback volume (0–1) for pronunciations, recorded or read aloud.
             {"volume", 0.22},
+            // Appearance beyond the colour scheme ("theme"): custom background and accent colours
+            // ("" uses the scheme's), and a background image copied into backgrounds/ with how
+            // strongly it shows (0–1) and how much it is blurred (CSS px).
+            {"backgroundColor", ""},
+            {"accentColor", ""},
+            {"backgroundImage", ""},
+            {"backgroundOpacity", 0.35},
+            {"backgroundBlur", 0},
             // Page zoom of the window (Ctrl+wheel, Ctrl +/−/0), kept across restarts.
             {"zoom", 1.0},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
@@ -292,8 +301,10 @@ Json Library::settings()
         {
             auto saved = Json::parse(read_file(path));
             // The window size is not user-configurable; older files must not pin a stale size.
+            // Numbers match any numeric default: JSON reads 12 back as unsigned, not as the int 0.
             for (auto &[key, value] : saved.items())
-                if (key != "window" && result.contains(key) && result[key].type() == value.type())
+                if (key != "window" && result.contains(key) &&
+                    (result[key].type() == value.type() || (result[key].is_number() && value.is_number())))
                     result[key] = value;
         }
     }
@@ -305,10 +316,24 @@ Json Library::settings()
 Json Library::save_settings(const Json &patch)
 {
     auto current = settings();
-    static const std::set<std::string> themes = {"light", "dark", "system"}, shells = {"mica", "direct2d"},
-                                        widths = {"narrow", "comfortable", "wide"};
-    if (patch.contains("theme") && patch["theme"].is_string() && themes.count(patch["theme"]))
+    static const std::set<std::string> shells = {"mica", "direct2d"}, widths = {"narrow", "comfortable", "wide"};
+    if (patch.contains("theme") && patch["theme"].is_string() && valid_theme(patch["theme"]))
         current["theme"] = patch["theme"];
+    const auto hex_color = [](const Json &value) {
+        if (!value.is_string())
+            return false;
+        const auto &text = value.get_ref<const std::string &>();
+        return text.empty() || (text.size() == 7 && text[0] == '#' &&
+                                std::all_of(text.begin() + 1, text.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)); }));
+    };
+    for (const char *key : {"backgroundColor", "accentColor"})
+        if (patch.contains(key) && hex_color(patch[key]))
+            current[key] = patch[key];
+    if (patch.contains("backgroundOpacity") && patch["backgroundOpacity"].is_number())
+        current["backgroundOpacity"] = std::clamp(patch["backgroundOpacity"].get<double>(), 0.0, 1.0);
+    if (patch.contains("backgroundBlur") && patch["backgroundBlur"].is_number())
+        current["backgroundBlur"] = std::clamp(patch["backgroundBlur"].get<int>(), 0, 40);
+    // "backgroundImage" is set only by set_background_image / clear_background_image.
     if (patch.contains("shell") && patch["shell"].is_string() && shells.count(patch["shell"]))
         current["shell"] = patch["shell"];
     if (patch.contains("articleWidth") && patch["articleWidth"].is_string() && widths.count(patch["articleWidth"]))
@@ -338,6 +363,78 @@ Json Library::save_settings(const Json &patch)
     std::lock_guard lock(mutex_);
     write_atomic(root_ / "settings.json", current.dump(2));
     return current;
+}
+
+bool valid_theme(const std::string &theme)
+{
+    static const std::set<std::string> themes = {"system", "light", "dark", "paper", "green", "gray", "night", "mocha"};
+    return themes.count(theme) > 0;
+}
+std::string theme_mode(const std::string &theme)
+{
+    if (theme == "system")
+        return "system";
+    return theme == "dark" || theme == "night" || theme == "mocha" ? "dark" : "light";
+}
+
+namespace
+{
+const std::set<std::string> image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"};
+} // namespace
+
+Json Library::set_background_image(const fs::path &source)
+{
+    const auto ext = lower_ascii(utf8(source.extension()));
+    if (!image_extensions.count(ext))
+        throw std::runtime_error("不支持的图片格式，请选择 JPG、PNG、WebP、GIF 或 BMP 图片");
+    std::error_code ec;
+    const auto size = fs::file_size(source, ec);
+    if (ec)
+        throw std::runtime_error("无法读取这张图片");
+    if (size > 50ull * 1024 * 1024)
+        throw std::runtime_error("图片超过 50 MB，请换一张小一些的");
+    // A copy, so the background survives the original being moved; a new name each time so the
+    // page never shows a cached older image.
+    const auto folder = root_ / "backgrounds";
+    fs::create_directories(folder);
+    const auto name = "background-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ext;
+    fs::copy_file(source, folder / name, fs::copy_options::overwrite_existing);
+    auto current = settings();
+    const auto previous = current.value("backgroundImage", std::string());
+    current["backgroundImage"] = name;
+    {
+        std::lock_guard lock(mutex_);
+        write_atomic(root_ / "settings.json", current.dump(2));
+    }
+    if (!previous.empty() && previous != name)
+        fs::remove(folder / previous, ec);
+    return current;
+}
+Json Library::clear_background_image()
+{
+    auto current = settings();
+    const auto previous = current.value("backgroundImage", std::string());
+    current["backgroundImage"] = "";
+    {
+        std::lock_guard lock(mutex_);
+        write_atomic(root_ / "settings.json", current.dump(2));
+    }
+    std::error_code ec;
+    if (!previous.empty())
+        fs::remove(root_ / "backgrounds" / path8(previous), ec);
+    return current;
+}
+std::optional<Resource> Library::background_image(const std::string &name)
+{
+    // Only the current image, by its exact name: nothing else in the data folder is reachable.
+    const auto current = settings().value("backgroundImage", std::string());
+    if (current.empty() || name != current)
+        return std::nullopt;
+    const auto path = root_ / "backgrounds" / path8(current);
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec))
+        return std::nullopt;
+    return Resource{mime_type(path), read_file(path)};
 }
 
 Json Library::history()
@@ -1147,9 +1244,9 @@ std::string Library::article_page(const std::string &id, const std::string &word
     };
     collect(word);
     // The typed writing's articles come first, then those found under its other writings.
-    for (auto &variant : chinese_variants(word))
-        if (fold_key(variant) != fold_key(word))
-            collect(variant);
+    for (auto &writing : chinese_variants(word))
+        if (fold_key(writing) != fold_key(word))
+            collect(writing);
     std::set<uint64_t> seen;
     std::string body;
     int articles = 0;

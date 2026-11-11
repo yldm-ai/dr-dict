@@ -202,6 +202,17 @@ void Window::set_theme(const std::string &theme)
     update_dim();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
+void Window::set_caption_colors(bool dark, UINT32 background, UINT32 text, UINT32 hover)
+{
+    resolved_theme_ = dark ? "dark" : "light";
+    caption_background_ = background;
+    caption_text_ = text;
+    caption_hover_ = hover;
+    BOOL value = dark;
+    DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
+    update_dim();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
 bool Window::system_dark()
 {
     DWORD light = 1, size = sizeof(light);

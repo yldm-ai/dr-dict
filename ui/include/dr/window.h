@@ -28,6 +28,8 @@ class Window
     RECT content_bounds() const;
     void set_style(ShellStyle style);
     void set_theme(const std::string &theme);
+    /** Exact title bar colours (0xRRGGBB) from the page's colour scheme, after set_theme. */
+    void set_caption_colors(bool dark, UINT32 background, UINT32 text, UINT32 hover);
     /** Whether Windows apps use the dark theme (thread-safe registry read). */
     static bool system_dark();
     // Called on the UI thread when the Windows app theme switches between light and dark.

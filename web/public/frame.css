@@ -37,8 +37,10 @@ html:not(.dr-embedded) body { padding: 0; }
    A plain invert(0.9) turns typical dictionary text (#333) into a dim #bdbdbd. Instead the page is
    fully inverted, then contrast lifts black to the app background and brightness lifts text:
    white -> #191919 (--bg) and #333 -> ~#e2e2e2, near Notion's dark text (white at 90%). */
+/* The frame itself stays transparent, so a custom background colour or image shows behind the
+   inverted text instead of a fixed dark grey. */
 html[data-dr-theme='dark'] {
-  background: #fff;
+  background: transparent;
   filter: invert(1) hue-rotate(180deg) contrast(0.835) brightness(1.18);
 }
 /* The inverse chain in reverse order, so media composite back to their own colours. */

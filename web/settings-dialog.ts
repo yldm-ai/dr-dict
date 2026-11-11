@@ -1,6 +1,8 @@
 import { $, call, toast } from './bridge.ts';
 import { hydrateIcons } from './icons.ts';
-import { publish, state, type Settings } from './state.ts';
+import { publish, state, type Settings, type Theme } from './state.ts';
+import { backgroundUrl, isHex, themes } from './appearance.ts';
+import { ColorPicker } from './color-picker.ts';
 import { speak } from './speech.ts';
 
 export type Tab = 'library' | 'interface' | 'article' | 'data';
@@ -44,6 +46,103 @@ function render(): void {
   if (!state.chineseAvailable)
     $('chinese-note').textContent = '未找到 OpenCC 数据（程序目录下的 opencc 文件夹），简繁查询不可用。';
   $('data-path').textContent = state.dataPath;
+  renderAppearance();
+}
+
+// Colour picker presets: light and dark backgrounds; Notion-like accents.
+const backgroundPresets = ['#ffffff', '#fbf7ef', '#eef3e8', '#f3f3f1', '#eaf1f8', '#f7eef0', '#191919', '#1b2230', '#211d1a', '#1c2420'];
+const accentPresets = ['#2b6f62', '#2f6f9f', '#4c7a47', '#8a5a3a', '#9065b0', '#c14c8a', '#d44c47', '#d9730d', '#cb912f', '#787774'];
+const picker = new ColorPicker(dialog);
+
+function renderAppearance(): void {
+  const s = state.settings;
+  $('theme-grid').innerHTML = themes
+    .map(
+      (t) => `<button class="theme-card" type="button" data-theme-id="${t.id}" aria-pressed="${s.theme === t.id}">
+        <span class="theme-sample" style="--sample-bg:${t.bg};--sample-text:${t.text};--sample-accent:${t.accent}">Aa</span>${t.name}
+      </button>`,
+    )
+    .join('');
+  const colorButton = (id: string, value: string, fallback: string) => {
+    const button = $(id);
+    const chip = button.querySelector<HTMLElement>('.color-chip')!;
+    const custom = isHex(value);
+    chip.classList.toggle('none', !custom);
+    chip.style.setProperty('--chip', custom ? value : 'transparent');
+    button.querySelector('.color-text')!.textContent = custom ? value.toUpperCase() : fallback;
+    $<HTMLButtonElement>(`${id}-reset`).disabled = !custom;
+  };
+  colorButton('bg-color', s.backgroundColor, '跟随配色');
+  colorButton('accent-color', s.accentColor, '跟随配色');
+  const preview = $('bg-image-preview');
+  preview.style.backgroundImage = s.backgroundImage ? `url("${backgroundUrl(s.backgroundImage)}")` : '';
+  preview.textContent = s.backgroundImage ? '' : '无';
+  $<HTMLButtonElement>('bg-image-clear').disabled = !s.backgroundImage;
+  const opacity = Math.round(s.backgroundOpacity * 100);
+  const opacityInput = $<HTMLInputElement>('bg-opacity');
+  opacityInput.value = String(opacity);
+  opacityInput.style.setProperty('--fill', `${((opacity - 5) / 95) * 100}%`);
+  opacityInput.disabled = !s.backgroundImage;
+  $('bg-opacity-value').textContent = `${opacity}%`;
+  const blurInput = $<HTMLInputElement>('bg-blur');
+  blurInput.value = String(s.backgroundBlur);
+  blurInput.style.setProperty('--fill', `${(s.backgroundBlur / 40) * 100}%`);
+  blurInput.disabled = !s.backgroundImage;
+  $('bg-blur-value').textContent = `${s.backgroundBlur}px`;
+}
+
+function initAppearance(): void {
+  dialog.addEventListener('close', () => picker.close(false));
+  $('theme-grid').addEventListener('click', (event) => {
+    const card = (event.target as HTMLElement).closest<HTMLElement>('[data-theme-id]');
+    if (card) void save({ theme: card.dataset.themeId as Theme, backgroundColor: '', accentColor: '' });
+  });
+  const colorSetting = (id: string, key: 'backgroundColor' | 'accentColor', title: string, presets: string[]) => {
+    const button = $(id);
+    button.addEventListener('click', () => {
+      if (picker.isOpen) {
+        picker.close();
+        return;
+      }
+      const current = state.settings[key] || getComputedStyle(document.body).getPropertyValue(key === 'backgroundColor' ? '--bg' : '--accent').trim();
+      picker.open(button, { title, color: current, presets, onPick: (color) => void save({ [key]: color }) });
+    });
+    $(`${id}-reset`).addEventListener('click', () => void save({ [key]: '' }));
+  };
+  colorSetting('bg-color', 'backgroundColor', '背景颜色', backgroundPresets);
+  colorSetting('accent-color', 'accentColor', '主题色', accentPresets);
+  $('bg-image-choose').addEventListener('click', async () => {
+    try {
+      const result = await call<Settings & { cancelled?: boolean }>('background.choose');
+      if (result.cancelled) return;
+      state.settings = result;
+      publish('settings');
+      render();
+    } catch (error) {
+      toast((error as Error).message, 'error');
+    }
+  });
+  $('bg-image-clear').addEventListener('click', async () => {
+    try {
+      state.settings = await call<Settings>('background.clear');
+      publish('settings');
+      render();
+    } catch (error) {
+      toast((error as Error).message, 'error');
+    }
+  });
+  // Sliders preview while dragging and save on release, like the volume.
+  const slider = (id: string, apply: (value: number) => Partial<Settings>) => {
+    const input = $<HTMLInputElement>(id);
+    input.addEventListener('input', () => {
+      state.settings = { ...state.settings, ...apply(Number(input.value)) };
+      renderAppearance();
+      publish('settings');
+    });
+    input.addEventListener('change', () => void save(apply(Number(input.value))));
+  };
+  slider('bg-opacity', (value) => ({ backgroundOpacity: value / 100 }));
+  slider('bg-blur', (value) => ({ backgroundBlur: value }));
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
@@ -73,6 +172,7 @@ export function openSettings(tab?: Tab): void {
 export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): void {
   onTabChange = handlers.onTabChange;
   hydrateIcons(dialog);
+  initAppearance();
   dialog.addEventListener('close', () => void call('window.dim', { dimmed: false }).catch(() => {}));
   dialog.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;

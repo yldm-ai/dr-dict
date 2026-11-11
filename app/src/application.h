@@ -36,6 +36,7 @@ class Application
     void resource(const std::wstring &uri, std::function<void(ResourceReply)> respond);
     std::vector<fs::path> pick_files();
     fs::path pick_folder();
+    fs::path pick_image();
     void import(const Json &id, std::vector<fs::path> paths, bool rescan = false);
     void apply_settings(const Json &settings);
     Window window_;

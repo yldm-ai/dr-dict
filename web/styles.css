@@ -57,6 +57,54 @@ body[data-theme='dark'] {
   --shadow-dialog: 0 24px 64px #000000b3, 0 8px 20px #00000066, 0 0 0 1px #ffffff1f;
   --shadow-flyout: 0 6px 18px #00000066, 0 0 0 1px #ffffff12;
 }
+/* Built-in colour schemes over the light or dark base above (appearance.ts sets data-palette).
+   Paper, bean green, mist grey and night blue follow DR Reader's reading palettes; each is
+   extended to every UI colour here. */
+body[data-palette='paper'] {
+  --bg: #fbf7ef; --sidebar: #f4eee2; --text: #4a4036; --strong: #2e261d; --muted: #85786a; --faint: #b0a593;
+  --border: #e7dfcf; --hover: #efe8da; --selected: #e7dece; --accent: #8a5a3a; --accent-hover: #744a2e;
+  --accent-soft: #f1e4d6; --control: #fffcf6; --control-border: #ddd2bf;
+}
+body[data-palette='green'] {
+  --bg: #eef3e8; --sidebar: #e5ecde; --text: #33402f; --strong: #1f2a1c; --muted: #6c7a66; --faint: #9eaa98;
+  --border: #d9e2d1; --hover: #e2eadb; --selected: #d8e2cf; --accent: #4c7a47; --accent-hover: #3e6739;
+  --accent-soft: #dce9d6; --control: #f6f9f2; --control-border: #cdd8c4;
+}
+body[data-palette='gray'] {
+  --bg: #f3f3f1; --sidebar: #ebebe8; --text: #37352f; --strong: #1f1e1b; --muted: #75746f; --faint: #a5a49f;
+  --border: #e0e0dc; --hover: #e7e7e4; --selected: #dfdfdb; --accent: #2f6f9f; --accent-hover: #275d86;
+  --accent-soft: #e1eaf2; --control: #fafaf9; --control-border: #d6d6d1;
+}
+body[data-palette='night'] {
+  --bg: #1b2230; --sidebar: #212a3a; --text: #c9d2de; --strong: #eef2f7; --muted: #8b97a8; --faint: #6c788a;
+  --border: #2c3647; --hover: #263043; --selected: #2e394d; --accent: #8ab4e0; --accent-hover: #a6c7ea;
+  --accent-soft: #253650; --on-accent: #0f1825; --control: #222b3b; --control-border: #36425a;
+}
+body[data-palette='mocha'] {
+  --bg: #211d1a; --sidebar: #29241f; --text: #e3d9cc; --strong: #f7efe4; --muted: #a59886; --faint: #7f7466;
+  --border: #362f28; --hover: #2f2924; --selected: #3a322b; --accent: #d4a373; --accent-hover: #e0b78d;
+  --accent-soft: #3d3024; --on-accent: #22170c; --control: #2a2420; --control-border: #42392f;
+}
+/* Background image: a fixed layer between the background colour and the interface. Surfaces
+   that would hide it become slightly translucent, blurring what passes beneath them. */
+body[data-bg-image]::before {
+  content: '';
+  position: fixed;
+  inset: calc(var(--bg-image-blur, 0px) * -2);
+  background: var(--bg-image) center / cover no-repeat;
+  opacity: var(--bg-image-opacity, 0.35);
+  filter: blur(var(--bg-image-blur, 0px));
+  pointer-events: none;
+}
+body[data-bg-image] .app { position: relative; }
+body[data-bg-image] .sidebar {
+  background: color-mix(in srgb, var(--sidebar) 80%, transparent);
+  backdrop-filter: blur(18px);
+}
+body[data-bg-image] .entry-header {
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  backdrop-filter: blur(12px);
+}
 body[data-article-width='narrow'] { --article-width: 680px; }
 body[data-article-width='wide'] { --article-width: 1100px; }
 
@@ -625,6 +673,82 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
   background: var(--bg); border: 2px solid var(--accent); box-shadow: 0 1px 2px #00000033;
 }
 .volume-slider:active::-webkit-slider-thumb { background: var(--accent); }
+/* Colour schemes: small paper cards showing the scheme's background, text and accent. */
+.theme-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; padding: 8px 0 4px; }
+@media (max-width: 900px) { .theme-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.theme-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: none;
+  color: var(--text); font-size: 12px; text-align: center; cursor: pointer;
+}
+.theme-sample {
+  position: relative; height: 52px; border-radius: 6px; overflow: hidden;
+  background: var(--sample-bg); color: var(--sample-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font: 600 15px/1 var(--font-display);
+}
+.theme-sample::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--sample-accent); }
+/* 跟随系统: half light, half dark. */
+.theme-card[data-theme-id='system'] .theme-sample { background: linear-gradient(135deg, #ffffff 50%, #191919 50%); color: #8a8a87; }
+.theme-card:hover .theme-sample { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 30%, transparent); }
+.theme-card[aria-pressed='true'] .theme-sample { box-shadow: 0 0 0 2px var(--accent); }
+.theme-card[aria-pressed='true'] { color: var(--strong); font-weight: 500; }
+.group-note.tight { margin: 4px 0 0; }
+/* Custom colours and background image: label on the left, controls on the right. */
+.appearance-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 12px; min-height: 40px; }
+.appearance-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.appearance-row > span { color: var(--text); }
+.appearance-row .volume-row { padding: 0; }
+.appearance-row:has(input:disabled) > span, .appearance-row:has(input:disabled) .volume-value { color: var(--faint); }
+.color-button { min-width: 132px; }
+.color-chip {
+  width: 16px; height: 16px; border-radius: 4px; background: var(--chip, transparent); flex: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 20%, transparent);
+}
+.color-chip.none { background: linear-gradient(135deg, transparent 45%, var(--danger) 45% 55%, transparent 55%); }
+.group .appearance-controls .button { margin-top: 0; align-self: center; }
+.image-preview {
+  width: 72px; height: 44px; border-radius: 5px; flex: none;
+  background: var(--hover) center / cover no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+  display: grid; place-items: center; color: var(--faint); font-size: 11px;
+}
+.volume-slider:disabled { cursor: default; opacity: 0.5; }
+/* Colour flyout (color-picker.ts). */
+.color-picker {
+  position: fixed; z-index: 50; width: 252px; padding: 12px; overflow-y: auto;
+  border: 1px solid var(--control-border); border-radius: 10px; background: var(--control); color: var(--text);
+  box-shadow: var(--shadow-flyout);
+  display: grid; gap: 10px; animation: context-in 120ms ease-out;
+}
+.cp-title { font-size: 12px; font-weight: 600; color: var(--strong); }
+.cp-presets { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.cp-preset {
+  aspect-ratio: 1; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
+}
+.cp-preset.selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent), 0 0 0 2px var(--control), 0 0 0 3px var(--accent); }
+.cp-area {
+  position: relative; height: 128px; border-radius: 6px; touch-action: none;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--hue, #ffcc00));
+}
+.cp-area-handle, .cp-hue-handle {
+  position: absolute; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%;
+  box-shadow: 0 0 0 1px #0000004d, 0 1px 3px #00000040; transform: translate(-50%, -50%); pointer-events: none;
+}
+.cp-hue {
+  position: relative; height: 10px; border-radius: 5px; touch-action: none;
+  background: linear-gradient(to right, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00);
+}
+.cp-hue-handle { top: 50%; background: transparent; }
+.cp-area:focus-visible, .cp-hue:focus-visible { outline-offset: 2px; }
+.cp-footer { display: flex; align-items: center; gap: 6px; }
+.cp-preview { flex: 0 0 26px; height: 26px; border-radius: 6px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent); }
+.cp-hex {
+  width: 0; flex: 1; height: 26px; padding: 0 8px; border: 1px solid var(--control-border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: 12px var(--font-ui);
+}
+.cp-hex:focus { outline: none; border-color: var(--accent); }
 .volume-value { width: 38px; text-align: right; color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
 /* Options that belong to the switch above them, indented under its label. */
 .choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); column-gap: 16px; margin-left: 26px; }

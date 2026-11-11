@@ -99,7 +99,31 @@ void Application::apply_settings(const Json &s)
 {
     auto shell = shell_override_.empty() ? s.value("shell", std::string("mica")) : shell_override_;
     window_.set_style(shell == "direct2d" ? ShellStyle::Direct2D : ShellStyle::Mica);
-    window_.set_theme(s.value("theme", std::string("system")));
+    // The page follows with the exact colours (window.chrome) once it has applied them.
+    window_.set_theme(theme_mode(s.value("theme", std::string("system"))));
+}
+
+fs::path Application::pick_image()
+{
+    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        throw std::runtime_error("无法打开文件选择器");
+    COMDLG_FILTERSPEC filters[] = {{L"图片 (*.jpg; *.png; *.webp; *.gif; *.bmp)", L"*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp"}};
+    dialog->SetFileTypes(1, filters);
+    dialog->SetTitle(L"选择背景图片");
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+    auto hr = dialog->Show(window_.handle());
+    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+        return {};
+    Microsoft::WRL::ComPtr<IShellItem> item;
+    LPWSTR path = nullptr;
+    if (FAILED(hr) || FAILED(dialog->GetResult(&item)) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        throw std::runtime_error("图片选择失败");
+    fs::path file(path);
+    CoTaskMemFree(path);
+    return file;
 }
 
 std::vector<fs::path> Application::pick_files()
@@ -215,6 +239,47 @@ void Application::receive(const Json &request)
                 import(id, std::move(paths));
             return;
         }
+        if (method == "background.choose")
+        {
+            auto file = pick_image();
+            if (file.empty())
+            {
+                webview_.send({{"id", id}, {"result", {{"cancelled", true}}}});
+                return;
+            }
+            queries_.enqueue([this, id, file] {
+                try
+                {
+                    reply(id, library_.set_background_image(file));
+                }
+                catch (const std::exception &e)
+                {
+                    reply_error(id, e.what());
+                }
+            });
+            return;
+        }
+        if (method == "window.chrome")
+        {
+            // Title bar colours matching the page's resolved scheme ("#rrggbb" each).
+            auto color = [&](const char *key, UINT32 fallback) {
+                auto text = params.value(key, std::string());
+                if (text.size() != 7 || text[0] != '#')
+                    return fallback;
+                try
+                {
+                    return static_cast<UINT32>(std::stoul(text.substr(1), nullptr, 16));
+                }
+                catch (const std::exception &)
+                {
+                    return fallback;
+                }
+            };
+            window_.set_caption_colors(params.value("dark", false), color("background", 0xffffff),
+                                       color("text", 0x37352f), color("hover", 0xefefed));
+            webview_.send({{"id", id}, {"result", true}});
+            return;
+        }
         if (method == "dict.rescan")
         {
             import(id, {}, true);
@@ -312,6 +377,8 @@ void Application::receive(const Json &request)
             }
             else if (method == "history.clear")
                 result = library_.clear_history();
+            else if (method == "background.clear")
+                result = library_.clear_background_image();
             else if (method == "history.remove")
                 result = library_.forget_word(params.at("word").get<std::string>());
             else if (method == "favorites.toggle")
@@ -383,7 +450,13 @@ void Application::resource(const std::wstring &wide_uri, std::function<void(Reso
             auto theme = query.count("theme") ? query["theme"] : std::string("light");
             if (theme != "dark" && theme != "light")
                 theme = "light";
-            if (route == "@article")
+            if (id == "@background")
+            {
+                // The interface background image (https://dict.dr-dict.local/@background/<name>).
+                if (auto image = library_.background_image(route))
+                    reply = {200, image->mime, std::move(image->data)};
+            }
+            else if (route == "@article")
             {
                 // "script": s / t shows the article in simplified / traditional characters;
                 // "variant" picks the traditional standard (t, tw, twp, hk).
@@ -414,7 +487,7 @@ int Application::run(HINSTANCE instance)
     auto shell = shell_override_.empty() ? settings.value("shell", std::string("mica")) : shell_override_;
     if (!window_.create(instance, shell == "direct2d" ? ShellStyle::Direct2D : ShellStyle::Mica, IDI_DR_DICT,
                         settings["window"].value("widthRatio", 0.4), settings["window"].value("heightRatio", 0.5),
-                        settings.value("theme", std::string("system"))))
+                        theme_mode(settings.value("theme", std::string("system")))))
         return 1;
     window_.set_title(L"DR Dict");
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
@@ -434,7 +507,7 @@ int Application::run(HINSTANCE instance)
                        {"left", button.left * scale},
                        {"width", (button.right - button.left) * scale}});
     };
-    window_.set_theme(settings.value("theme", std::string("system")));
+    window_.set_theme(theme_mode(settings.value("theme", std::string("system"))));
     webview_.on_message = [this](const Json &request) { receive(request); };
     webview_.on_resource = [this](const std::wstring &uri, std::function<void(ResourceReply)> respond) {
         resource(uri, std::move(respond));

@@ -14,6 +14,7 @@ import {
 } from './articles.ts';
 import { brandMark, hydrateIcons } from './icons.ts';
 import { initContextMenu } from './context-menu.ts';
+import { applyAppearance, resendWindowChrome } from './appearance.ts';
 import { addDictionaries, initLibrary, resetLibrary } from './library-panel.ts';
 import { initSettings, openSettings } from './settings-dialog.ts';
 import { Tooltips } from './tooltip.ts';
@@ -34,7 +35,7 @@ let mode: 'history' | 'suggest' = 'history';
 let listKind: 'history' | 'favorites' = 'history';
 
 function applyTheme(): void {
-  document.body.dataset.theme = effectiveTheme();
+  applyAppearance();
   document.body.dataset.articleWidth = state.settings.articleWidth;
 }
 
@@ -345,6 +346,9 @@ async function bootstrap(): Promise<void> {
     if (signature !== previous) refresh();
     previous = signature;
   });
+  // Saving re-applies the native theme (plain light/dark title bar) before the reply arrives, so
+  // the scheme's exact colours go back to the title bar afterwards.
+  subscribe('saved', resendWindowChrome);
   let previousChinese = '';
   subscribe('saved', () => {
     // Simplified/traditional lookup changes what a lookup finds, so ask again.
@@ -356,7 +360,11 @@ async function bootstrap(): Promise<void> {
     applyTheme();
     refresh();
   });
-  on('system-theme', ({ dark }) => setSystemDark(Boolean(dark)));
+  on('system-theme', ({ dark }) => {
+    setSystemDark(Boolean(dark));
+    // The native title bar went back to its plain light/dark colours; restore the scheme's.
+    resendWindowChrome();
+  });
   on('zoom', ({ factor }) => toast(`缩放 ${Math.round(Number(factor) * 100)}%（Ctrl 0 还原）`, 'success'));
   on('caption-tooltip', ({ text, left, width }) => {
     // A Direct2D caption button's tip: the button ends at the top edge of the web content.

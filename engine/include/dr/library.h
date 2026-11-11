@@ -35,6 +35,12 @@ class Library
     Json settings();
     Json save_settings(const Json &patch);
     static Json default_settings();
+    // The interface background image: copied into <data>/backgrounds (the previous copy is
+    // deleted) and named in the "backgroundImage" setting. Both return the settings.
+    Json set_background_image(const fs::path &source);
+    Json clear_background_image();
+    /** The current background image when `name` is its stored name, for the resource handler. */
+    std::optional<Resource> background_image(const std::string &name);
     Json history();
     Json remember(const std::string &word);
     Json clear_history();
@@ -107,6 +113,11 @@ class Library
 };
 
 std::string mime_type(const fs::path &path);
+// Colour schemes ("theme"): system, light, dark, and the built-in paper, green, gray (light) and
+// night, mocha (dark).
+bool valid_theme(const std::string &theme);
+/** "system", "light" or "dark": the window mode a colour scheme uses. */
+std::string theme_mode(const std::string &theme);
 // Possible base forms for inflected English words ("studies" → "study"), tried after a miss.
 std::vector<std::string> english_base_forms(const std::string &word);
 } // namespace dr
