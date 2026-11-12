@@ -61,7 +61,7 @@ pwsh -File .\scripts\install-uiaccess.ps1
 
 测试证书只能用于本机，不要对外分发用它签名的程序。
 
-命令行参数：`dr-dict.exe [--data-dir <目录>] [--shell mica|direct2d] [词典文件或文件夹...]`。默认数据目录为 `%LOCALAPPDATA%\DRDict`。
+命令行参数：`dr-dict.exe [--data-dir <目录>] [--shell mica|direct2d] [--lookup <词>] [词典文件或文件夹...]`。`--lookup` 在鼠标旁的弹窗中查词；若 DR Dict 已在运行，就交给已运行的实例处理。DR Reader 选词菜单中的“查词典”就是这样调用的（见 [docs/architecture.md](docs/architecture.md)）。默认数据目录为 `%LOCALAPPDATA%\DRDict`。
 
 ## 目录
 

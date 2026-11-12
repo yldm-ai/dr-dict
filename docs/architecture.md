@@ -60,6 +60,11 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
   - 因此弹窗创建时不置顶，等页面导航完成 1 秒后才设为 TOPMOST。
   - 每次移动、显示或切换置顶层级后，都调用 `NotifyParentWindowPositionChanged`。
   - 隐藏和显示时同步设置控制器的 `IsVisible`；不这样做，再次显示时只会看到旧的空白帧。
+- **供其他程序调用**（DR Reader 选词菜单的“查词典”）：
+  - 按窗口类 `DrDictPopup` 找到弹窗宿主，发送 `WM_COPYDATA`：`dwData = 0x4B4C5244`（"DRLK"），数据是 UTF-8 JSON `{"word": "...", "x": 屏幕 x, "y": 屏幕 y}`，弹窗在该点旁打开。常量见 `app/src/popup.h`。
+  - 发送方先对 DR Dict 进程调用 `AllowSetForegroundWindow`，弹窗才能取得焦点；uiAccess 版本用 `ChangeWindowMessageFilterEx` 放行 `WM_COPYDATA`。
+  - DR Dict 未运行时，用 `dr-dict.exe --lookup <词>` 启动：页面就绪、弹窗置顶后再显示（约 1.5 秒）。若已有实例在运行，`--lookup` 只把词转交给它，然后退出。
+  - DR Dict 每次启动都会把自身路径写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\dr-dict.exe`，其他程序可以直接用 `ShellExecute("dr-dict.exe")` 启动它。这里记录的是最近一次运行的那个副本。
 
 ## 安全边界
 

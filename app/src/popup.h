@@ -1,8 +1,16 @@
 #pragma once
 #include <functional>
+#include <string_view>
 #include <windows.h>
 namespace dr
 {
+// Other programs (DR Reader's “查词典”) look a word up in the popup by finding its host window by
+// class and sending it WM_COPYDATA with dwData = lookup_request and UTF-8 JSON
+// {"word": "...", "x": screen x, "y": screen y} — the point the popup opens beside. The sender
+// should AllowSetForegroundWindow DR Dict's process first, so the popup may take focus.
+inline constexpr wchar_t popup_class[] = L"DrDictPopup";
+inline constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK"
+
 // The Ctrl+C+C lookup popup's host window: borderless, resizable from a thin edge around the
 // WebView, shown next to the mouse pointer and kept above other windows.
 //
@@ -45,6 +53,8 @@ class Popup
     std::function<void()> on_focus; // the host got keyboard focus; hand it to the WebView
     std::function<void()> on_hidden;
     std::function<void(int width, int height)> on_resized; // DIPs, after the user resizes
+    std::function<void()> on_topmost;                      // the host has been pinned above other windows
+    std::function<void(std::string_view)> on_request;      // a lookup_request's payload (see above)
 
   private:
     static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l);

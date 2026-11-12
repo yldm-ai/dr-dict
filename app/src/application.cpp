@@ -79,9 +79,10 @@ void Worker::enqueue(std::function<void()> work)
     wake_.notify_one();
 }
 
-Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell)
-    : library_(std::move(root)), assets_(std::move(assets)), initial_files_(std::move(files)),
-      shell_override_(std::move(shell))
+Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell,
+                         std::optional<LookupRequest> lookup)
+    : pending_lookup_(std::move(lookup)), library_(std::move(root)), assets_(std::move(assets)),
+      initial_files_(std::move(files)), shell_override_(std::move(shell))
 {
     // OpenCC data is installed beside the web assets (bin/<config>/opencc).
     library_.set_opencc_dir(assets_.parent_path() / "opencc");
@@ -121,8 +122,25 @@ void Application::apply_hotkey(const Json &s)
 
 namespace
 {
-// The clipboard's text, with whitespace runs collapsed; empty when it holds none. Another
-// application may still have the clipboard open right after its copy, so opening is retried.
+// Text to look up in the popup: whitespace runs collapsed and trimmed, at most 256 characters.
+std::string popup_word(const std::wstring &text)
+{
+    std::wstring collapsed;
+    for (wchar_t c : text)
+    {
+        const bool space = iswspace(c) || c == 0x3000;
+        if (space && (collapsed.empty() || collapsed.back() == L' '))
+            continue;
+        collapsed += space ? L' ' : c;
+    }
+    while (!collapsed.empty() && collapsed.back() == L' ')
+        collapsed.pop_back();
+    if (collapsed.size() > 256) // a paragraph, not a word: the popup still opens with its start
+        collapsed.resize(256);
+    return narrow(collapsed);
+}
+// The clipboard's text as popup_word; empty when it holds none. Another application may still
+// have the clipboard open right after its copy, so opening is retried.
 std::string clipboard_text()
 {
     bool open = false;
@@ -138,21 +156,39 @@ std::string clipboard_text()
             GlobalUnlock(data);
         }
     CloseClipboard();
-    std::wstring collapsed;
-    for (wchar_t c : text)
-    {
-        const bool space = iswspace(c) || c == 0x3000;
-        if (space && (collapsed.empty() || collapsed.back() == L' '))
-            continue;
-        collapsed += space ? L' ' : c;
-    }
-    while (!collapsed.empty() && collapsed.back() == L' ')
-        collapsed.pop_back();
-    if (collapsed.size() > 256) // a paragraph, not a word: the popup still opens with its start
-        collapsed.resize(256);
-    return narrow(collapsed);
+    return popup_word(text);
 }
 } // namespace
+
+// Runs on a worker: the popup gets the word with the settings and dictionaries it renders with.
+void Application::send_popup_lookup(const std::string &word)
+{
+    Json event = {{"event", "popup-lookup"},
+                  {"word", word},
+                  {"settings", library_.settings()},
+                  {"dictionaries", library_.list()},
+                  {"favorites", library_.favorites()},
+                  {"systemDark", Window::system_dark()},
+                  {"chineseAvailable", library_.chinese_available()}};
+    // The page looks the word up, renders, then asks for popup.show.
+    window_.post([this, event] { popup_view_.send(event); });
+}
+
+void Application::request_lookup(LookupRequest request)
+{
+    request.word = popup_word(widen(request.word));
+    if (request.word.empty())
+        return;
+    // Started by the request (--lookup), or asked right after start-up: wait for the popup's
+    // WebView and its TOPMOST (see create_popup), then show it.
+    if (!popup_view_.ready() || !popup_.topmost())
+    {
+        pending_lookup_ = std::move(request);
+        return;
+    }
+    popup_cursor_ = request.at;
+    queries_.enqueue([this, word = std::move(request.word)] { send_popup_lookup(word); });
+}
 
 void Application::copied_twice()
 {
@@ -169,17 +205,8 @@ void Application::copied_twice()
         // the selection on the clipboard.
         Sleep(80);
         auto word = clipboard_text();
-        if (word.empty())
-            return;
-        Json event = {{"event", "popup-lookup"},
-                      {"word", word},
-                      {"settings", library_.settings()},
-                      {"dictionaries", library_.list()},
-                      {"favorites", library_.favorites()},
-                      {"systemDark", Window::system_dark()},
-                      {"chineseAvailable", library_.chinese_available()}};
-        // The page looks the word up, renders, then asks for popup.show.
-        window_.post([this, event] { popup_view_.send(event); });
+        if (!word.empty())
+            send_popup_lookup(word);
     });
 }
 
@@ -200,6 +227,22 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
     };
     popup_.on_resized = [this](int width, int height) {
         queries_.enqueue([this, width, height] { library_.save_settings({{"popupWidth", width}, {"popupHeight", height}}); });
+    };
+    popup_.on_topmost = [this] {
+        if (auto request = std::exchange(pending_lookup_, std::nullopt))
+            request_lookup(std::move(*request));
+    };
+    popup_.on_request = [this](std::string_view payload) {
+        // {"word": "...", "x": …, "y": …} from another program (see popup.h).
+        auto request = Json::parse(payload, nullptr, false);
+        if (!request.is_object() || !request.contains("word") || !request["word"].is_string())
+            return;
+        POINT at{};
+        GetCursorPos(&at);
+        if (request.contains("x") && request["x"].is_number_integer() && request.contains("y") &&
+            request["y"].is_number_integer())
+            at = {request["x"].get<LONG>(), request["y"].get<LONG>()};
+        request_lookup({request["word"].get<std::string>(), at});
     };
     popup_view_.on_message = [this](const Json &request) { receive(request, popup_view_); };
     popup_view_.on_resource = webview_.on_resource;

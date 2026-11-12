@@ -5,6 +5,7 @@
 #include "popup.h"
 #include "webview.h"
 #include <condition_variable>
+#include <optional>
 #include <queue>
 #include <thread>
 namespace dr
@@ -25,10 +26,18 @@ class Worker
     std::vector<std::jthread> threads_;
 };
 
+// A word to show in the popup beside a screen point (from --lookup or another program).
+struct LookupRequest
+{
+    std::string word;
+    POINT at{};
+};
+
 class Application
 {
   public:
-    Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell);
+    Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell,
+                std::optional<LookupRequest> lookup = std::nullopt);
     int run(HINSTANCE instance);
 
   private:
@@ -40,6 +49,9 @@ class Application
     void create_popup(HINSTANCE instance, const Json &settings);
     void apply_hotkey(const Json &settings);
     void copied_twice();
+    // Lookups asked for by other programs; held until the popup is up and pinned.
+    void request_lookup(LookupRequest request);
+    void send_popup_lookup(const std::string &word);
     void resource(const std::wstring &uri, std::function<void(ResourceReply)> respond);
     std::vector<fs::path> pick_files();
     fs::path pick_folder();
@@ -52,6 +64,7 @@ class Application
     WebView popup_view_;
     CopyHotkey hotkey_;
     POINT popup_cursor_{};
+    std::optional<LookupRequest> pending_lookup_;
     Library library_;
     fs::path assets_;
     std::vector<fs::path> initial_files_;

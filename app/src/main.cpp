@@ -2,6 +2,37 @@
 #include "dr/text.h"
 #include <shellapi.h>
 #include <shlobj.h>
+namespace
+{
+// Lets other programs (DR Reader's “查词典”) start DR Dict by name: ShellExecute resolves
+// "dr-dict.exe" through App Paths. Per user, so no elevation; follows the copy that ran last.
+void register_app_path(const std::wstring &executable)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\dr-dict.exe", 0,
+                        nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return;
+    RegSetValueExW(key, nullptr, 0, REG_SZ, reinterpret_cast<const BYTE *>(executable.c_str()),
+                   static_cast<DWORD>((executable.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+}
+// --lookup with DR Dict already running: hand the word to that instance's popup (see popup.h).
+bool forward_lookup(const std::string &word, POINT at)
+{
+    HWND popup = FindWindowW(dr::popup_class, nullptr);
+    if (!popup)
+        return false;
+    DWORD process = 0;
+    GetWindowThreadProcessId(popup, &process);
+    AllowSetForegroundWindow(process);
+    const auto payload = dr::Json{{"word", word}, {"x", at.x}, {"y", at.y}}.dump();
+    COPYDATASTRUCT data{dr::lookup_request, static_cast<DWORD>(payload.size()), const_cast<char *>(payload.data())};
+    DWORD_PTR handled = 0;
+    return SendMessageTimeoutW(popup, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 3000,
+                               &handled) &&
+           handled;
+}
+} // namespace
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 {
     auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -22,11 +53,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
         LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
         std::vector<dr::fs::path> files;
         std::string shell;
+        std::optional<dr::LookupRequest> lookup;
         for (int i = 1; i < argc; ++i)
         {
             std::wstring arg = argv[i];
             if (arg == L"--data-dir" && i + 1 < argc)
                 root = argv[++i];
+            else if (arg == L"--lookup" && i + 1 < argc)
+            {
+                // The popup opens beside the pointer, as for Ctrl+C+C.
+                lookup = dr::LookupRequest{dr::narrow(argv[++i])};
+                GetCursorPos(&lookup->at);
+            }
             else if (arg == L"--shell" && i + 1 < argc)
             {
                 shell = dr::narrow(argv[++i]);
@@ -39,11 +77,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
                 files.emplace_back(arg);
         }
         LocalFree(argv);
+        if (lookup && forward_lookup(lookup->word, lookup->at))
+        {
+            CoUninitialize();
+            return 0;
+        }
         auto assets = dr::fs::path(executable).parent_path() / "web";
         if (!dr::fs::exists(assets / "index.html"))
             throw std::runtime_error("未找到 web/index.html，请保持 web 目录与程序位于一起");
+        register_app_path(executable);
         {
-            dr::Application app(dr::fs::absolute(root), assets, std::move(files), shell);
+            dr::Application app(dr::fs::absolute(root), assets, std::move(files), shell, std::move(lookup));
             result = app.run(instance);
         }
     }

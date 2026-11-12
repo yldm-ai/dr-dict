@@ -6,7 +6,6 @@ namespace dr
 {
 namespace
 {
-constexpr wchar_t window_class[] = L"DrDictPopup";
 constexpr UINT_PTR track_timer = 1;
 constexpr UINT_PTR topmost_timer = 2;
 constexpr UINT track_interval_ms = 30;
@@ -53,15 +52,17 @@ bool Popup::create(HINSTANCE instance, HWND /*owner*/)
     wc.lpfnWndProc = procedure;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.lpszClassName = window_class;
+    wc.lpszClassName = popup_class;
     RegisterClassExW(&wc);
     brush_ = CreateSolidBrush(RGB(255, 255, 255));
     // Unowned, so it still shows while the main window is minimised; a tool window, so it has
     // no taskbar button. Not TOPMOST yet (see the class comment).
-    hwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, window_class, L"DR Dict", WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN,
+    hwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, popup_class, L"DR Dict", WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN,
                             0, 0, 360, 420, nullptr, nullptr, instance, this);
     if (!hwnd_)
         return false;
+    // UIPI drops WM_COPYDATA from ordinary programs to a uiAccess one; lookup requests are let in.
+    ChangeWindowMessageFilterEx(hwnd_, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
     // Rounded corners and the system shadow, as for other Windows 11 flyouts.
     const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
@@ -179,6 +180,8 @@ void Popup::make_topmost()
     topmost_ = true;
     if (on_moved)
         on_moved();
+    if (on_topmost)
+        on_topmost();
 }
 
 void Popup::schedule_topmost(UINT delay_ms)
@@ -339,6 +342,14 @@ LRESULT Popup::handle(UINT message, WPARAM w, LPARAM l)
     case WM_CLOSE:
         hide();
         return 0;
+    case WM_COPYDATA: {
+        // A lookup from another program; the payload is only valid during this message.
+        const auto *data = reinterpret_cast<const COPYDATASTRUCT *>(l);
+        if (!data || data->dwData != lookup_request || !data->lpData || data->cbData > 64 * 1024 || !on_request)
+            return FALSE;
+        on_request(std::string_view(static_cast<const char *>(data->lpData), data->cbData));
+        return TRUE;
+    }
     }
     return DefWindowProcW(hwnd_, message, w, l);
 }
