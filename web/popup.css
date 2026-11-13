@@ -27,7 +27,7 @@
 .popup-search .icon { width: 14px; height: 14px; }
 .popup-search input {
   flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; outline: none;
-  color: var(--strong); font: 600 14px var(--font-ui);
+  color: var(--strong); font: 600 14px var(--font-side);
 }
 .popup-search:focus-within { border-color: var(--accent); }
 .popup-body { position: relative; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border); }
