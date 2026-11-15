@@ -241,7 +241,7 @@ export function renderHome(): void {
   const recent = state.history.slice(0, 18);
   home.innerHTML = `<div class="home-inner">
       <div class="home-mark">${brandMark}</div>
-      <h1 class="home-title">DR Dict</h1>
+      <h1 class="home-title">水杉词典</h1>
       <p class="home-lead">输入一个词，在你所有的词典里查找。</p>
       ${
         activeDictionaries().length
