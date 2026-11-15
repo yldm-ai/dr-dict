@@ -1,3 +1,5 @@
+import brandLogo from '../resources/dr-dict.svg?url&no-inline';
+
 // Line icons drawn for DR Dict on a 24px grid; they inherit the current text color.
 const paths: Record<string, string> = {
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
@@ -47,5 +49,5 @@ export function hydrateIcons(root: ParentNode = document): void {
   }
 }
 
-// The app mark: an open book with a ribbon, matching resources/dr-dict.svg.
-export const brandMark = `<svg viewBox="0 0 256 256" aria-hidden="true"><rect x="8" y="8" width="240" height="240" rx="56" fill="currentColor"/><path d="M128 86C106 72 82 72 58 82V178C82 168 106 168 128 182C150 168 174 168 198 178V82C174 72 150 72 128 86ZM128 86V182" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><path d="M158 77V122L170 112L182 122V74" fill="#fff"/></svg>`;
+// Use the original SVG for both the sidebar and home page, without recoloring or rasterizing it.
+export const brandMark = `<img src="${brandLogo}" alt="" draggable="false" />`;

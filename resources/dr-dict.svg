@@ -1,5 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect x="8" y="8" width="240" height="240" rx="56" fill="#2b6f62"/>
-  <path d="M128 86C106 72 82 72 58 82V178C82 168 106 168 128 182C150 168 174 168 198 178V82C174 72 150 72 128 86ZM128 86V182" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M158 77V122L170 112L182 122V74" fill="#ffffff"/>
+<svg width="1000" height="1189" viewBox="0 0 1000 1189" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<path d="M0 60C0 26.8629 26.8629 0 60 0H1000V1077H0V60Z" fill="black"/>
+<rect x="55" y="61" width="122" height="750" fill="#D02F2F"/>
+<rect x="55" y="889" width="867" height="122" fill="white"/>
+<rect x="263" y="61" width="659" height="750" fill="#D02F2F"/>
+<path d="M328 889H578V1189L453 1106.5L328 1189V889Z" fill="black"/>
+<path d="M385 930H520V1092L452.5 1047.45L385 1092V930Z" fill="#C62B2B"/>
+<use xlink:href="#stroke0_22_88" fill="#C4D9D5"/>
+<mask id="stroke1_22_88" maskUnits="userSpaceOnUse" x="414.871" y="193" width="330" height="486" fill="black">
+<rect fill="white" x="414.871" y="193" width="330" height="486"/>
+<use xlink:href="#stroke0_22_88"/>
+</mask>
+<path d="M418.871 476.47C418.871 539.665 418.871 631.376 418.871 664.761C418.871 671.267 424.985 675.992 431.296 674.414L732.977 598.994C737.429 597.881 740.552 593.881 740.552 589.293V207.808C740.552 201.302 734.438 196.528 728.126 198.106L426.446 273.526C421.994 274.639 418.871 278.596 418.871 283.185C418.871 311.321 418.871 409.777 418.871 476.47Z" stroke-width="8" stroke="#C8E3BF" stroke-opacity="0.58" mask="url(#stroke1_22_88)"/>
+<path d="M465.918 299.545L707.48 230.944V368.147L465.918 299.545Z" fill="#A1C353"/>
+<path d="M465.918 484.512L707.48 415.911V553.113L465.918 484.512Z" fill="#C12700" fill-opacity="0.8"/>
+<path d="M689.082 393.235L447.52 461.836V324.634L689.082 393.235Z" fill="#00A23A"/>
+<path d="M689.082 577.398L447.52 645.999V508.797L689.082 577.398Z" fill="#787350" fill-opacity="0.5"/>
+<defs>
+<path id="stroke0_22_88" d="M418.871 283.185C418.871 278.596 421.994 274.639 426.446 273.526L728.126 198.106C734.438 196.528 740.552 201.302 740.552 207.808V589.293C740.552 593.882 737.429 597.881 732.977 598.994L431.296 674.414C424.985 675.992 418.871 671.267 418.871 664.761C418.871 631.376 418.871 539.665 418.871 476.47C418.871 409.777 418.871 311.321 418.871 283.185Z"/>
+</defs>
 </svg>

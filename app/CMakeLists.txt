@@ -14,7 +14,8 @@ else()
 endif()
 configure_file(app.manifest.in "${CMAKE_CURRENT_BINARY_DIR}/dr-dict.manifest" @ONLY)
 add_executable(dr-dict WIN32 src/main.cpp src/application.cpp src/webview.cpp src/popup.cpp src/copy_hotkey.cpp src/http.cpp src/agent_runner.cpp app.rc)
-set_property(SOURCE app.rc APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/dr-dict.manifest")
+set_property(SOURCE app.rc APPEND PROPERTY OBJECT_DEPENDS
+  "${CMAKE_CURRENT_BINARY_DIR}/dr-dict.manifest" "${PROJECT_SOURCE_DIR}/resources/dr-dict.ico")
 target_include_directories(dr-dict PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}" "${webview2_SOURCE_DIR}/build/native/include")
 target_link_libraries(dr-dict PRIVATE dr_engine dr_shell "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib" ole32 shell32 shlwapi comdlg32 version dwmapi shcore winhttp crypt32)
 target_link_options(dr-dict PRIVATE /MANIFEST:NO)
@@ -33,6 +34,7 @@ add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/frontend.stamp"
   DEPENDS ${DR_FRONTEND_SOURCES} "${PROJECT_SOURCE_DIR}/package.json"
     "${PROJECT_SOURCE_DIR}/pnpm-lock.yaml" "${PROJECT_SOURCE_DIR}/tsconfig.json" "${PROJECT_SOURCE_DIR}/vite.config.ts"
     "${PROJECT_SOURCE_DIR}/scripts/vite-build.mjs"
+    "${PROJECT_SOURCE_DIR}/resources/dr-dict.svg"
   COMMENT "Type checking and bundling the WebView2 UI with Vite"
   VERBATIM)
 add_custom_target(dr-assets
