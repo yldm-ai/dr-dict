@@ -2,6 +2,7 @@
 #include "dr/library.h"
 #include "dr/window.h"
 #include "copy_hotkey.h"
+#include "http.h"
 #include "popup.h"
 #include "webview.h"
 #include <condition_variable>
@@ -71,6 +72,14 @@ class Application
     fs::path pick_image();
     void import(const Json &id, std::vector<fs::path> paths, bool rescan = false);
     void apply_settings(const Json &settings);
+    // 小牛翻译 credentials: DPAPI-encrypted for this Windows user in <data>/niutrans-key.bin (as
+    // DR Music keeps them) and never sent back to the page, which only sees niutrans_status().
+    void load_niutrans_key();
+    void save_niutrans_key(const std::string &app_id, const std::string &apikey);
+    Json niutrans_status() const;
+    // Online requests (translation, Wiktionary pages and their frames) run on online_, so a slow
+    // network never holds up dictionary lookups on queries_.
+    void online(const Json &id, const std::string &method, const Json &params, WebView &from);
     Window window_;
     WebView webview_;
     Popup popup_;
@@ -82,7 +91,12 @@ class Application
     fs::path assets_;
     std::vector<fs::path> initial_files_;
     std::string shell_override_;
+    std::shared_ptr<HttpCancel> http_cancel_ = std::make_shared<HttpCancel>();
+    NiuTrans niutrans_;
+    Wiktionary wiktionary_;
+    // Workers come last: they are destroyed (joined) first, before anything their jobs use.
     Worker queries_{2};
     Worker imports_{1};
+    Worker online_{3};
 };
 } // namespace dr

@@ -5,7 +5,7 @@ import { backgroundUrl, isHex, themes } from './appearance.ts';
 import { ColorPicker } from './color-picker.ts';
 import { speak } from './speech.ts';
 
-export type Tab = 'library' | 'interface' | 'article' | 'data';
+export type Tab = 'library' | 'interface' | 'article' | 'online' | 'data';
 const dialog = $<HTMLDialogElement>('settings-dialog');
 const tabs = [...dialog.querySelectorAll<HTMLButtonElement>('.tab')];
 let onTabChange: (tab: Tab) => void = () => {};
@@ -48,6 +48,71 @@ function render(): void {
     $('chinese-note').textContent = '未找到 OpenCC 数据（程序目录下的 opencc 文件夹），简繁查询不可用。';
   $('data-path').textContent = state.dataPath;
   renderAppearance();
+  renderOnline();
+}
+
+function renderOnline(): void {
+  $<HTMLInputElement>('translate-sentences').checked = state.settings.translateSentences;
+  for (const input of dialog.querySelectorAll<HTMLInputElement>('input[data-wiki]'))
+    input.checked = state.settings.wiktionary.includes(input.dataset.wiki!);
+  const { configured, appId } = state.niutrans;
+  const appIdInput = $<HTMLInputElement>('niutrans-app-id');
+  if (configured && !appIdInput.value) appIdInput.value = appId;
+  $<HTMLInputElement>('niutrans-api-key').placeholder = configured ? '已保存，留空则不修改' : '';
+  const status = $('niutrans-status');
+  status.textContent = configured ? `已配置 · App ID ${appId}` : '尚未填写 App ID 和 API Key';
+  status.dataset.state = configured ? 'ready' : 'missing';
+  $<HTMLButtonElement>('niutrans-clear').disabled = !configured;
+  $<HTMLButtonElement>('niutrans-test').disabled = !configured;
+}
+
+function initOnline(): void {
+  const appId = $<HTMLInputElement>('niutrans-app-id');
+  const apikey = $<HTMLInputElement>('niutrans-api-key');
+  const saveKey = async (clear: boolean) => {
+    const id = clear ? '' : appId.value.trim();
+    const key = clear ? '' : apikey.value.trim();
+    if (!clear && !key && state.niutrans.configured && id === state.niutrans.appId) {
+      toast('密钥没有变化', 'info');
+      return;
+    }
+    if (!clear && (!id || !key)) {
+      toast('请填写 App ID 和 API Key', 'error');
+      return;
+    }
+    try {
+      state.niutrans = await call('niutrans.save', { appId: id, apikey: key });
+      apikey.value = '';
+      if (clear) appId.value = '';
+      renderOnline();
+      publish('niutrans');
+      toast(clear ? '已清除小牛翻译密钥' : '已加密保存小牛翻译密钥', 'success');
+    } catch (error) {
+      toast((error as Error).message, 'error');
+    }
+  };
+  $('niutrans-save').addEventListener('click', () => void saveKey(false));
+  $('niutrans-clear').addEventListener('click', () => void saveKey(true));
+  apikey.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') void saveKey(false);
+  });
+  const test = $<HTMLButtonElement>('niutrans-test');
+  test.addEventListener('click', async () => {
+    test.disabled = true;
+    test.textContent = '测试中…';
+    try {
+      const result = await call<{ translation: string }>('niutrans.test');
+      toast(`测试成功：${result.translation}`, 'success');
+    } catch (error) {
+      toast(`测试失败：${(error as Error).message}`, 'error');
+    } finally {
+      test.textContent = '测试翻译';
+      renderOnline();
+    }
+  });
+  $('niutrans-console').addEventListener('click', () =>
+    call('open.external', { url: 'https://niutrans.com/cloud/api/list' }).catch((e) => toast(e.message, 'error')),
+  );
 }
 
 // Colour picker presets: light and dark backgrounds; Notion-like accents.
@@ -174,6 +239,7 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
   onTabChange = handlers.onTabChange;
   hydrateIcons(dialog);
   initAppearance();
+  initOnline();
   dialog.addEventListener('close', () => void call('window.dim', { dimmed: false }).catch(() => {}));
   dialog.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -197,6 +263,13 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
     else if (input.id === 'invert-articles') void save({ invertArticles: input.checked });
     else if (input.id === 'scan-popup') void save({ scanPopup: input.checked });
     else if (input.id === 'chinese-conversion') void save({ chineseConversion: input.checked });
+    else if (input.id === 'translate-sentences') void save({ translateSentences: input.checked });
+    else if (input.dataset.wiki)
+      void save({
+        wiktionary: [...dialog.querySelectorAll<HTMLInputElement>('input[data-wiki]')]
+          .filter((i) => i.checked)
+          .map((i) => i.dataset.wiki!),
+      });
     else if (input.id === 'volume') void save({ volume: Number(input.value) / 100 });
   });
   // While dragging, the label, the slider fill and open articles follow at once; the value is

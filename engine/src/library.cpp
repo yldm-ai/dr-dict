@@ -1,4 +1,5 @@
 #include "dr/library.h"
+#include "dr/online.h"
 #include "dr/text.h"
 #include <algorithm>
 #include <cctype>
@@ -267,6 +268,11 @@ Json Library::default_settings()
             {"popupHeight", 420},
             // Page zoom of the window (Ctrl+wheel, Ctrl +/−/0), kept across restarts.
             {"zoom", 1.0},
+            // 小牛翻译 translates sentences, and words no dictionary has, between Chinese and English
+            // (once the user has saved an App ID and API Key).
+            {"translateSentences", true},
+            // Wiktionary editions (dr/online.h wiki_sites) shown after the dictionaries.
+            {"wiktionary", Json::array({"en"})},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
             {"window", {{"widthRatio", 0.4}, {"heightRatio", 0.5}}}};
 }
@@ -362,6 +368,17 @@ Json Library::save_settings(const Json &patch)
         current["volume"] = std::clamp(patch["volume"].get<double>(), 0.0, 1.0);
     if (patch.contains("zoom") && patch["zoom"].is_number())
         current["zoom"] = std::clamp(patch["zoom"].get<double>(), 0.25, 5.0);
+    if (patch.contains("translateSentences") && patch["translateSentences"].is_boolean())
+        current["translateSentences"] = patch["translateSentences"];
+    if (patch.contains("wiktionary") && patch["wiktionary"].is_array())
+    {
+        // Known editions only, each once, in the order of wiki_sites().
+        Json sites = Json::array();
+        for (const auto &site : wiki_sites())
+            if (std::find(patch["wiktionary"].begin(), patch["wiktionary"].end(), site.id) != patch["wiktionary"].end())
+                sites.push_back(site.id);
+        current["wiktionary"] = sites;
+    }
     if (patch.contains("scope") && patch["scope"].is_array() && patch["scope"].size() <= 1000)
     {
         Json ids = Json::array();

@@ -512,6 +512,45 @@ body[data-theme='dark'] .sidebar { box-shadow: 0 4px 16px #00000040; }
 body[data-theme='dark'] .avatar.letter { color: hsl(var(--hue) 45% 78%); background: hsl(var(--hue) 22% 22%); }
 .not-found { color: var(--muted); border-top: 1px solid var(--border); padding-top: 18px; }
 .not-found p { margin: 0 0 14px; }
+/* A sentence as the headword: body-sized, so a paragraph does not fill the screen in display type. */
+.hero.sentence .hero-word { font: 500 19px/1.6 var(--font-ui); letter-spacing: 0; color: var(--text); }
+
+/* 小牛翻译: the translation sits on the page like an article, with a quiet header and a copy button. */
+.translation { border-top: 1px solid var(--border); padding: 4px 0 18px; }
+.translation-header { display: flex; align-items: center; gap: 8px; height: 40px; }
+.translation-name { font-weight: 600; color: var(--strong); }
+.translation-direction { color: var(--muted); font-size: 12px; }
+.translation-copy {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; margin-left: auto; padding: 0 8px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--muted); font: 400 12px var(--font-ui);
+  cursor: pointer;
+}
+.translation-copy > span { display: grid; }
+.translation-copy .icon { width: 14px; height: 14px; }
+.translation-copy:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.translation-copy:active:not(:disabled) { background: var(--selected); }
+.translation-copy:disabled { opacity: 0.45; cursor: default; }
+.translation-copy.done { color: var(--accent); }
+.translation-text {
+  margin: 0; color: var(--strong); font-size: 16px; line-height: 1.75;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
+.translation-error { margin: 0; color: var(--danger); font-size: 13px; }
+.translation .skeleton { display: none; position: static; padding-top: 4px; }
+.translation.loading .skeleton { display: flex; }
+.translation.setup {
+  display: flex; align-items: flex-start; gap: 8px; padding: 14px 0 18px; color: var(--muted); font-size: 13px;
+}
+.translation.setup > .icon { width: 16px; height: 16px; margin-top: 2px; flex: none; color: var(--faint); }
+.translation.setup p { margin: 0; }
+.link-button {
+  padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer;
+  text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 2px;
+}
+.link-button:hover { text-decoration-color: currentColor; }
+.popup-content .translation:first-child { border-top: 0; }
+.popup-content .translation-text { font-size: 15px; }
 
 /* Home */
 .home-inner { padding-top: 12vh; text-align: left; max-width: 640px; }
@@ -761,6 +800,23 @@ body[data-theme='dark'] .dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 .group-note.plain { margin: 6px 0 0; line-height: 1.8; }
 .group .button { align-self: flex-start; margin-top: 10px; }
 .group .data-path { margin-top: 6px; }
+/* 设置 → 在线: the 小牛翻译 key fields and their actions. */
+.key-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0 0; }
+.key-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; color: var(--muted); }
+.text-input {
+  height: 30px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: var(--radius);
+  background: var(--control); color: var(--strong); font: 400 13px var(--font-ui); outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.text-input::placeholder { color: var(--faint); }
+.text-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--control-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.key-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.group .key-actions .button { margin-top: 0; }
+.key-status { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; }
+.key-status[data-state='ready'] { color: var(--accent); }
 .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 20px 16px; flex-shrink: 0; }
 .footer-note { margin-right: auto; color: var(--faint); font-size: 12px; }
 .dialog-footer .button { min-width: 88px; justify-content: center; }

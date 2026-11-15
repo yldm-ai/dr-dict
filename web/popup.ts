@@ -15,6 +15,16 @@ import {
   type Dictionary,
 } from './state.ts';
 import { initScriptSwitch, scriptQuery, scriptSwitch } from './script-switch.ts';
+import {
+  fillTranslation,
+  findWiki,
+  initTranslation,
+  isSentence,
+  translationHtml,
+  translationMode,
+  wikiSection,
+  wikiWanted,
+} from './online.ts';
 
 type Hit = { id: string; name: string; count: number };
 type LookupResult = { word: string; query: string; results: Hit[]; variants?: string[]; suggestions?: string[] };
@@ -98,16 +108,16 @@ async function toggleFavorite(): Promise<void> {
 }
 
 /** The contents rail at the right, as in the main window (articles.ts); none for one dictionary. */
-function renderJump(result: LookupResult): void {
-  jump.hidden = result.results.length < 2;
+function renderJump(hits: Hit[]): void {
+  jump.hidden = hits.length < 2;
   jump.innerHTML = jump.hidden
     ? ''
-    : `<div class="toc-rail" aria-hidden="true">${result.results
+    : `<div class="toc-rail" aria-hidden="true">${hits
         .map((hit) => `<span class="toc-line" data-id="${escape(hit.id)}"></span>`)
         .join('')}</div>
        <div class="toc-panel">
          <div class="toc-title">词典</div>
-         ${result.results
+         ${hits
            .map((hit) => {
              const dict = state.dictionaries.find((d) => d.id === hit.id);
              return `<button class="jump-item" type="button" data-id="${escape(hit.id)}">
@@ -154,18 +164,47 @@ function render(result: LookupResult): void {
   jumpPin = null;
   content.scrollTop = 0;
   updateFavorite();
-  renderJump(result);
+  renderJump(result.results);
+  const sentence = isSentence(result.query);
+  const translation = translationMode(result.query, result.results.length > 0);
+  const translationBlock = translation
+    ? translationHtml(translation, '长句可以用小牛翻译直接译成中文或英文：在主窗口的“设置 → 在线”中填写 App ID 和 API Key。')
+    : '';
+  const paper = effectiveTheme() === 'dark' && frameTheme() === 'light';
+  const shown = () => current === result;
+  if (translation === 'translate')
+    queueMicrotask(() => {
+      const section = content.querySelector<HTMLElement>('.translation');
+      if (section && shown()) void fillTranslation(section, result.query, shown);
+    });
+  // Wiktionary sections follow the dictionaries once they arrive (see online.ts).
+  if (wikiWanted(result.word))
+    void findWiki(result.word).then((wiki) => {
+      if (!shown() || !wiki.length) return;
+      if (!result.results.length) content.querySelector('.not-found')?.remove();
+      content.insertAdjacentHTML(
+        'beforeend',
+        wiki.map((hit) => wikiSection(hit, frameTheme(), paper, collapsed.has(hit.id))).join(''),
+      );
+      hydrateIcons(content);
+      renderJump([...result.results, ...wiki.map((w) => ({ id: w.id, name: w.name, count: 1 }))]);
+    });
   if (!result.results.length) {
     const suggestions = result.suggestions ?? [];
-    content.innerHTML = `<div class="not-found">
+    content.innerHTML =
+      translationBlock +
+      (sentence
+        ? ''
+        : `<div class="not-found">
         <p>没有找到“${escape(result.query)}”。${suggestions.length ? '试试这些词：' : ''}</p>
         ${suggestions.length ? `<div class="chips">${suggestions.map((s) => `<button class="chip" type="button" data-word="${escape(s)}">${escape(s)}</button>`).join('')}</div>` : ''}
-      </div>`;
+      </div>`);
+    hydrateIcons(content);
     return;
   }
   const redirected = result.word.toLowerCase() !== result.query.toLowerCase();
-  const paper = effectiveTheme() === 'dark' && frameTheme() === 'light';
   content.innerHTML =
+    translationBlock +
     `<div class="popup-meta">${result.results.length} 部词典${redirected ? ` · 由“${escape(result.query)}”推断的原形` : ''}${
       result.variants?.length ? ` · 同时查了 ${result.variants.map(escape).join('、')}` : ''
     }</div>` +
@@ -222,6 +261,7 @@ on('popup-lookup', (data) => {
   state.dictionaries = (data.dictionaries ?? []) as Dictionary[];
   state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
   state.chineseAvailable = Boolean(data.chineseAvailable);
+  if (data.niutrans) state.niutrans = data.niutrans;
   setSystemDark(Boolean(data.systemDark));
   applyAppearance();
   if (pinButton.getAttribute('aria-pressed') !== 'true') {
@@ -353,6 +393,7 @@ window.addEventListener('message', (event) => {
 });
 
 initContextMenu({ lookup: (word) => void lookup(word) });
+initTranslation(content);
 hydrateIcons();
 applyAppearance();
 document.body.classList.add('ready');

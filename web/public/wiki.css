@@ -1,0 +1,44 @@
+/* Wiktionary articles (https://dict.dr-dict.local/@wiki-<site>/@article), after frame.css. The
+   parser output comes without Wikimedia's skin, so this gives it a plain reading layout; inline
+   TemplateStyles in the page still style the templates themselves. */
+.dr-wiki { overflow-wrap: break-word; }
+.dr-wiki h2, .dr-wiki h3, .dr-wiki h4, .dr-wiki h5 { margin: 18px 0 6px; color: #1f1e1b; line-height: 1.35; }
+.dr-wiki h2 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #ebebe9; }
+.dr-wiki h3 { font-size: 16px; }
+.dr-wiki h4, .dr-wiki h5 { font-size: 15px; }
+.dr-wiki .mw-heading:first-child h2, .dr-wiki > div > .mw-heading2:first-of-type h2 { margin-top: 4px; }
+.dr-wiki p { margin: 6px 0; }
+.dr-wiki ol, .dr-wiki ul { margin: 6px 0; padding-left: 26px; }
+.dr-wiki ol > li { margin: 4px 0; }
+.dr-wiki dl { margin: 4px 0; }
+.dr-wiki dd { margin-left: 20px; color: #5f5e5a; }
+.dr-wiki a { text-decoration: none; }
+.dr-wiki a:hover { text-decoration: underline; }
+.dr-wiki a.new { color: #b4483f; }
+.dr-wiki table { border-collapse: collapse; font-size: 14px; }
+.dr-wiki .wikitable > tbody > tr > * { border: 1px solid #dcdcd8; padding: 3px 8px; }
+.dr-wiki .wikitable > tbody > tr > th { background: #f3f3f1; }
+.dr-wiki audio { height: 30px; max-width: 220px; vertical-align: middle; }
+.dr-wiki .headword-line, .dr-wiki .headword { font-weight: 600; }
+.dr-wiki .h-usage-example, .dr-wiki .e-example { color: #5f5e5a; }
+/* Boxes that only point to sister projects, editor notices and empty template slots. */
+.dr-wiki .sister-wikipedia, .dr-wiki .sister-project, .dr-wiki .noprint, .dr-wiki .mw-empty-elt,
+.dr-wiki .checktrans, .dr-wiki .maintenance-line, .dr-wiki .mw-editsection, .dr-wiki .catlinks { display: none; }
+.dr-wiki .floatright { float: right; margin: 0 0 8px 12px; }
+/* Collapsible boxes (translations, phrasebook, inflection tables): closed until their header is
+   clicked (wiki.js), as on the site. */
+.dr-wiki .NavFrame { margin: 6px 0; border: 1px solid #ebebe9; border-radius: 6px; background: none !important; }
+.dr-wiki .NavHead {
+  position: relative; padding: 4px 10px 4px 26px; background: none !important; font-size: 14px; font-weight: 500;
+  cursor: pointer; user-select: none;
+}
+.dr-wiki .NavHead::before {
+  content: ''; position: absolute; left: 11px; top: 50%; width: 5px; height: 5px; margin-top: -4px;
+  border-right: 1.5px solid #a8a7a2; border-bottom: 1.5px solid #a8a7a2; transform: rotate(-45deg);
+}
+.dr-wiki .NavFrame.dr-open > .NavHead::before { transform: rotate(45deg); margin-top: -5px; }
+.dr-wiki .NavFrame:not(.dr-open) > .NavContent { display: none; }
+.dr-wiki .NavContent { padding: 4px 10px 8px; }
+.dr-wiki .NavContent table { background: none !important; }
+.dr-wiki-source { margin: 20px 0 0; color: #a8a7a2; font-size: 12px; }
+.dr-wiki-source a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }

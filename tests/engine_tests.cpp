@@ -1,6 +1,7 @@
 #include "dr/compress.h"
 #include "dr/library.h"
 #include "dr/mdict.h"
+#include "dr/online.h"
 #include "dr/ripemd128.h"
 #include "dr/stardict.h"
 #include "dr/text.h"
@@ -150,6 +151,132 @@ int main()
     CHECK(std::find(forms.begin(), forms.end(), "study") != forms.end());
     forms = english_base_forms("running");
     CHECK(std::find(forms.begin(), forms.end(), "run") != forms.end());
+
+    // Online sources, with a fake network.
+    CHECK(md5_hex("") == "d41d8cd98f00b204e9800998ecf8427e");
+    CHECK(md5_hex("abc") == "900150983cd24fb0d6963f7d28e17f72");
+    CHECK(code_points("a苹果") == 3);
+    CHECK(translation_direction("今天天气很好。").from == "zh");
+    CHECK(translation_direction("我喜欢 Python 编程").to == "en");
+    CHECK(translation_direction("The weather is nice today.").from == "en");
+    CHECK(translation_direction("I visited 北京 last year").to == "zh");
+    // authStr: "key=value" pairs in key order, apikey included, empty values and authStr left out.
+    CHECK(NiuTrans::auth_str({{"to", "zh"}, {"from", "en"}, {"empty", ""}, {"authStr", "x"}}, "k") ==
+          md5_hex("apikey=k&from=en&to=zh"));
+    {
+        std::vector<HttpRequest> sent;
+        NiuTrans niu(
+            [&](const HttpRequest &request) {
+                sent.push_back(request);
+                return HttpResponse{200, R"({"from":"en","to":"zh","tgtText":" 今天天气很好。 "})"};
+            },
+            [] { return 1700000000000LL; });
+        bool threw = false;
+        try
+        {
+            niu.translate("Hello");
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        CHECK(threw && sent.empty()); // no credentials, no request
+        niu.set_credentials("app", "key");
+        auto result = niu.translate("  The weather is nice today.  ");
+        CHECK(result["translation"] == "今天天气很好。");
+        CHECK(result["from"] == "en" && result["to"] == "zh");
+        CHECK(sent.size() == 1);
+        if (!sent.empty())
+        {
+            CHECK(sent[0].method == "POST" && sent[0].url == "https://api.niutrans.com/v2/text/translate");
+            auto body = Json::parse(sent[0].body);
+            CHECK(body["srcText"] == "The weather is nice today." && body["appId"] == "app");
+            CHECK(body["timestamp"] == "1700000000000");
+            std::map<std::string, std::string> params;
+            for (auto &[k, v] : body.items())
+                params[k] = v.get<std::string>();
+            CHECK(body["authStr"] == NiuTrans::auth_str(params, "key"));
+        }
+        niu.translate("The weather is nice today.");
+        CHECK(sent.size() == 1); // remembered
+        niu.translate("The weather is nice today.", false);
+        CHECK(sent.size() == 2);
+        NiuTrans denied([](const HttpRequest &) { return HttpResponse{200, R"({"errorCode":"20001","errorMsg":"auth"})"}; });
+        denied.set_credentials("app", "bad");
+        std::string message;
+        try
+        {
+            denied.translate("你好");
+        }
+        catch (const std::runtime_error &e)
+        {
+            message = e.what();
+        }
+        CHECK(message.find("鉴权失败") != std::string::npos);
+    }
+    {
+        const auto &en = *find_wiki_site("en");
+        CHECK(find_wiki_site("xx") == nullptr);
+        CHECK(wiki_parse_url(en, "ice cream").find("&page=ice%20cream") != std::string::npos);
+        const std::string wrapper = "<div class=\"mw-content-ltr mw-parser-output\" lang=\"en\" dir=\"ltr\">";
+        const std::string page =
+            wrapper + "<div class=\"disambig-see-also\">See also</div>"
+                      "<div class=\"mw-heading mw-heading2\"><h2 id=\"English\">English</h2></div><p>en</p>"
+                      "<div class=\"mw-heading mw-heading2\"><h2 id=\"French\">French</h2></div><p>fr</p>"
+                      "<div class=\"mw-heading mw-heading2\"><h2 id=\"Chinese\">Chinese</h2></div><p>zh</p>"
+                      "<div class=\"mw-heading mw-heading2\"><h2 id=\"Dutch\">Dutch</h2></div><p>nl</p></div>";
+        auto kept = keep_wiki_languages(page, en.languages);
+        CHECK(kept.find("<p>en</p>") != std::string::npos && kept.find("<p>zh</p>") != std::string::npos);
+        CHECK(kept.find("<p>fr</p>") == std::string::npos && kept.find("<p>nl</p>") == std::string::npos);
+        CHECK(kept.find("See also") != std::string::npos);
+        CHECK(kept.size() >= 6 && kept.substr(kept.size() - 6) == "</div>"); // the wrapper stays closed
+        CHECK(keep_wiki_languages(page, {"Latin"}) == page);                  // nothing matched: whole page
+
+        auto html = rewrite_wiki_html(
+            en, "<a href=\"/wiki/ice_cream#English\" title=\"x\">i</a><a href=\"/wiki/Appendix:Glossary#dated\">g</a>"
+                "<a href=\"/w/index.php?title=x&amp;action=edit\">e</a><a href=\"#Noun\">n</a>"
+                "<a href=\"https://en.wikipedia.org/wiki/hello\">w</a><img src=\"//upload.wikimedia.org/a.png\" "
+                "srcset=\"//upload.wikimedia.org/b.png 1.5x, //upload.wikimedia.org/c.png 2x\">"
+                "<span style=\"background:url(//upload.wikimedia.org/d.svg)\"></span>"
+                "<script>alert(1)</script><SCRIPT src=\"x\"></SCRIPT><p>x=\"y\" stays</p>");
+        CHECK(html.find("href=\"entry://ice%20cream\"") != std::string::npos);
+        CHECK(html.find("href=\"https://en.wiktionary.org/wiki/Appendix:Glossary#dated\"") != std::string::npos);
+        CHECK(html.find("href=\"https://en.wiktionary.org/w/index.php?title=x&amp;action=edit\"") != std::string::npos);
+        CHECK(html.find("href=\"#Noun\"") != std::string::npos);
+        CHECK(html.find("href=\"https://en.wikipedia.org/wiki/hello\"") != std::string::npos);
+        CHECK(html.find("src=\"https://upload.wikimedia.org/a.png\"") != std::string::npos);
+        CHECK(html.find("srcset=\"https://upload.wikimedia.org/b.png 1.5x, https://upload.wikimedia.org/c.png 2x\"") !=
+              std::string::npos);
+        CHECK(html.find("url(https://upload.wikimedia.org/d.svg)") != std::string::npos);
+        CHECK(html.find("alert") == std::string::npos && lower_ascii(html).find("<script") == std::string::npos);
+        CHECK(html.find("<p>x=\"y\" stays</p>") != std::string::npos);
+
+        CHECK(!parse_wiki_reply(en, R"({"error":{"code":"missingtitle"}})"));
+        auto article = parse_wiki_reply(en, Json{{"parse", {{"title", "hello"}, {"pageid", 1}, {"text", page}}}}.dump());
+        CHECK(article && article->title == "hello" && article->html.find("<p>fr</p>") == std::string::npos);
+        if (article)
+        {
+            auto frame = wiki_page(en, *article, "dark");
+            CHECK(frame.find("data-dr-theme=\"dark\"") != std::string::npos);
+            CHECK(frame.find("Content-Security-Policy") != std::string::npos);
+            CHECK(frame.find("https://en.wiktionary.org/wiki/hello") != std::string::npos);
+        }
+
+        // "Hello" has no page of its own: the lowercase title is tried, and both are remembered.
+        std::vector<std::string> asked;
+        Wiktionary wiki([&](const HttpRequest &request) {
+            asked.push_back(request.url);
+            if (request.url.find("&page=hello") != std::string::npos)
+                return HttpResponse{200, Json{{"parse", {{"title", "hello"}, {"text", "<p>hi</p>"}}}}.dump()};
+            return HttpResponse{200, R"({"error":{"code":"missingtitle"}})"};
+        });
+        auto found = wiki.lookup(en, "Hello");
+        CHECK(found && found->title == "hello" && asked.size() == 2);
+        CHECK(wiki.lookup(en, "Hello") && wiki.lookup(en, "hello") && asked.size() == 2);
+        CHECK(!wiki.lookup(en, "zzqq") && asked.size() == 4); // zzqq, then Zzqq
+        CHECK(!wiki.lookup(en, "zzqq") && asked.size() == 4); // misses are remembered too
+        CHECK(!wiki.lookup(en, std::string(81, 'a')) && asked.size() == 4);
+    }
 
     char temp[MAX_PATH];
     GetTempPathA(MAX_PATH, temp);
@@ -456,6 +583,11 @@ int main()
             CHECK(zh.article_page(id, "软", "light", "t").find("<p>軟體</p>") != std::string::npos);
             CHECK(zh.article_page(id, "软", "light", "t", "t").find("<p>軟件</p>") != std::string::npos);
         }
+        // Online settings: known Wiktionary editions only, once each, in a fixed order.
+        CHECK(zh.settings()["wiktionary"] == Json::array({"en"}));
+        CHECK(zh.save_settings({{"wiktionary", {"zh", "xx", "en", "zh"}}})["wiktionary"] == Json::array({"en", "zh"}));
+        CHECK(zh.save_settings({{"wiktionary", Json::array()}, {"translateSentences", false}})["wiktionary"].empty());
+        CHECK(zh.settings()["translateSentences"] == false);
         zh.save_settings({{"chineseVariant", "t"}});
         CHECK(zh.lookup("里面")["results"].size() == 1);
         zh.save_settings({{"chineseVariant", "all"}});

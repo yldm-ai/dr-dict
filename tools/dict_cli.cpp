@@ -3,7 +3,9 @@
 //   dr-dict-cli <data-dir> list | folders | rescan | remove <dict-id> | suggest <prefix> | lookup <word>
 //   dr-dict-cli <data-dir> variants <chinese-word> [t|tw|twp|hk|all]
 //   dr-dict-cli <data-dir> article <dict-id> <word> | resource <dict-id> <path> [save-as]
+//   dr-dict-cli <data-dir> wiki <en|zh> <saved-parse-reply.json> [save-as.html]
 #include "dr/library.h"
+#include "dr/online.h"
 #include "dr/text.h"
 #include <chrono>
 #include <iostream>
@@ -63,6 +65,24 @@ int wmain(int argc, wchar_t **argv)
         }
         else if (command == "article")
             std::cout << library.article_page(arg(3), arg(4), "light") << "\n";
+        else if (command == "wiki")
+        {
+            // A saved action=parse reply rendered as its article frame, to check the rewriting
+            // against real pages: wiki <en|zh> <reply.json> [save-as.html]
+            const auto *site = find_wiki_site(arg(3));
+            if (!site)
+                throw std::runtime_error("unknown wiki site");
+            auto article = parse_wiki_reply(*site, read_file(argv[4]));
+            if (!article)
+            {
+                std::cerr << "no page\n";
+                return 1;
+            }
+            auto page = wiki_page(*site, *article, "light");
+            std::cout << article->title << ": " << page.size() << " bytes\n";
+            if (argc > 5)
+                write_file(argv[5], page);
+        }
         else if (command == "resource")
         {
             auto r = library.resource(arg(3), arg(4));

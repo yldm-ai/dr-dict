@@ -11,6 +11,17 @@ import { initScriptSwitch, scriptQuery, scriptSwitch } from './script-switch.ts'
 import { speak, stopSpeaking } from './speech.ts';
 import { scopeIds } from './scope.ts';
 import { hideContextMenu, showContextMenu } from './context-menu.ts';
+import {
+  fillTranslation,
+  findWiki,
+  initTranslation,
+  isSentence,
+  translationHtml,
+  translationMode,
+  wikiSection,
+  wikiWanted,
+  type WikiHit,
+} from './online.ts';
 
 type Hit = { id: string; name: string; count: number };
 type LookupResult = {
@@ -92,6 +103,18 @@ function frameTheme(): string {
   return effectiveTheme() === 'dark' && state.settings.invertArticles ? 'dark' : 'light';
 }
 
+function heroMeta(result: LookupResult, wiki: WikiHit[]): string {
+  const redirected = result.word.toLowerCase() !== result.query.toLowerCase();
+  const scoped = scopeIds().length ? ` · 仅查 ${scopeIds().length} 部词典` : '';
+  const online = wiki.length ? ` · ${wiki.map((w) => escape(w.name)).join('、')}` : '';
+  if (result.results.length)
+    return `在 ${result.results.length} 部词典中找到${redirected ? ` · 由“${escape(result.query)}”推断的原形` : ''}${
+      result.variants?.length ? ` · 同时查了 ${result.variants.map(escape).join('、')}` : ''
+    }${scoped}${online}`;
+  if (wiki.length) return `本地词典中没有这个词${scoped}${online}`;
+  return isSentence(result.query) ? `整句${scoped}` : `没有找到这个词${scoped}`;
+}
+
 function show(result: LookupResult, fromHistory = false): void {
   current = result;
   pinned = null;
@@ -99,30 +122,52 @@ function show(result: LookupResult, fromHistory = false): void {
   results.hidden = false;
   content.scrollTop = 0;
   onWordShown(result.word, fromHistory);
-  const redirected = result.word.toLowerCase() !== result.query.toLowerCase();
-  const scoped = scopeIds().length ? ` · 仅查 ${scopeIds().length} 部词典` : '';
-  const hero = `<header class="hero">
-      <h1 class="hero-word">${escape(result.word)}</h1>
-      <div class="hero-meta">${
-        result.results.length
-          ? `在 ${result.results.length} 部词典中找到${redirected ? ` · 由“${escape(result.query)}”推断的原形` : ''}${
-              result.variants?.length ? ` · 同时查了 ${result.variants.map(escape).join('、')}` : ''
-            }${scoped}`
-          : `没有找到这个词${scoped}`
-      }</div>
-    </header>`;
+  const sentence = isSentence(result.query);
+  const translation = translationMode(result.query, result.results.length > 0);
+  const hero = `<header class="hero${sentence ? ' sentence' : ''}">
+      <h1 class="hero-word">${escape(sentence ? result.query : result.word)}</h1>
+      <div class="hero-meta">${heroMeta(result, [])}</div>
+    </header>${
+      translation
+        ? translationHtml(
+            translation,
+            '长句可以用小牛翻译直接译成中文或英文。<button class="link-button" type="button" data-action="online-settings">在设置中填写 API Key</button>',
+          )
+        : ''
+    }`;
+  const theme = frameTheme();
+  const paper = effectiveTheme() === 'dark' && theme === 'light';
+  const shown = () => current === result;
+  if (translation === 'translate') queueMicrotask(() => {
+    const section = results.querySelector<HTMLElement>('.translation');
+    if (section && shown()) void fillTranslation(section, result.query, shown);
+  });
+  // Wiktionary answers after the dictionaries; its sections are appended when they arrive.
+  if (wikiWanted(result.word))
+    void findWiki(result.word).then((wiki) => {
+      if (!shown() || !wiki.length) return;
+      results.insertAdjacentHTML(
+        'beforeend',
+        wiki.map((hit) => wikiSection(hit, theme, paper, collapsed.has(hit.id))).join(''),
+      );
+      hydrateIcons(results);
+      results.querySelector('.hero-meta')!.innerHTML = heroMeta(result, wiki);
+      renderJump([...result.results, ...wiki.map((w) => ({ id: w.id, name: w.name, count: 1 }))]);
+    });
   if (!result.results.length) {
     const suggestions = result.suggestions ?? [];
-    results.innerHTML = `${hero}<div class="not-found">
+    // A sentence is not misspelt: no "check the spelling" and no similar headwords.
+    results.innerHTML = sentence
+      ? hero
+      : `${hero}<div class="not-found">
         <p>${state.dictionaries.some((d) => d.enabled) ? '已启用的词典中都没有收录这个词。检查一下拼写，或试试下面这些词：' : '还没有启用任何词典。在“设置 → 词典库”中添加或启用词典。'}</p>
         ${suggestions.length ? `<div class="chips">${suggestions.map((s) => `<button class="chip" type="button" data-word="${escape(s)}">${escape(s)}</button>`).join('')}</div>` : ''}
       </div>`;
+    hydrateIcons(results);
     jump.innerHTML = '';
     jump.hidden = true;
     return;
   }
-  const theme = frameTheme();
-  const paper = effectiveTheme() === 'dark' && theme === 'light';
   results.innerHTML =
     hero +
     result.results
@@ -148,17 +193,21 @@ function show(result: LookupResult, fromHistory = false): void {
       })
       .join('');
   hydrateIcons(results);
-  // The contents: one short line per dictionary at the right edge; hovering unfolds the names.
-  // A single dictionary needs none.
-  jump.hidden = result.results.length < 2;
+  renderJump(result.results);
+}
+
+// The contents: one short line per dictionary at the right edge; hovering unfolds the names.
+// A single dictionary needs none.
+function renderJump(hits: Hit[]): void {
+  jump.hidden = hits.length < 2;
   jump.innerHTML = jump.hidden
     ? ''
-    : `<div class="toc-rail" aria-hidden="true">${result.results
+    : `<div class="toc-rail" aria-hidden="true">${hits
         .map((hit) => `<span class="toc-line" data-id="${escape(hit.id)}"></span>`)
         .join('')}</div>
        <div class="toc-panel">
          <div class="toc-title">词典</div>
-         ${result.results
+         ${hits
            .map((hit) => {
              const dict = state.dictionaries.find((d) => d.id === hit.id);
              return `<button class="jump-item" type="button" data-id="${escape(hit.id)}" title="${escape(hit.name)}">
@@ -271,7 +320,11 @@ function updateJump(): void {
     item.classList.toggle('active', item.dataset.id === active);
 }
 
-export function initArticles(handlers: { focusSearch: (text?: string, append?: string) => void }): void {
+export function initArticles(handlers: {
+  focusSearch: (text?: string, append?: string) => void;
+  openOnlineSettings: () => void;
+}): void {
+  initTranslation(results);
   content.addEventListener('scroll', updateJump, { passive: true });
   jump.addEventListener('click', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>('.jump-item');
@@ -288,6 +341,10 @@ export function initArticles(handlers: { focusSearch: (text?: string, append?: s
     content.addEventListener(type, () => (pinned = null), { passive: true });
   results.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest('[data-action="online-settings"]')) {
+      handlers.openOnlineSettings();
+      return;
+    }
     const chip = target.closest<HTMLElement>('[data-word]');
     if (chip) {
       void lookup(chip.dataset.word!);

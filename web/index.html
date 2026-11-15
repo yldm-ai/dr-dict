@@ -87,6 +87,7 @@
         <button class="tab" type="button" role="tab" data-tab="library" aria-selected="true"><span data-icon="library"></span>词典库</button>
         <button class="tab" type="button" role="tab" data-tab="interface" aria-selected="false"><span data-icon="layout"></span>界面</button>
         <button class="tab" type="button" role="tab" data-tab="article" aria-selected="false"><span data-icon="book"></span>词条</button>
+        <button class="tab" type="button" role="tab" data-tab="online" aria-selected="false"><span data-icon="globe"></span>在线</button>
         <button class="tab" type="button" role="tab" data-tab="data" aria-selected="false"><span data-icon="clock"></span>数据</button>
       </div>
       <div class="tab-body">
@@ -218,6 +219,33 @@
               <label class="choice"><input id="scan-popup" type="checkbox" /><span>在任意程序中选中文字后按 <kbd>Ctrl C</kbd> <kbd>C</kbd>，弹出小窗口查词</span></label>
               <p class="group-note">按住 Ctrl，快速按两次 C。DR Dict 需保持运行（可最小化）。</p>
               <p class="group-note plain">双击词条正文中的词继续查询；<kbd>Ctrl K</kbd> 聚焦搜索框；<kbd>Alt ←</kbd> / <kbd>Alt →</kbd> 后退与前进。</p>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="tab-panel" role="tabpanel" data-panel="online" hidden>
+          <div class="groups">
+            <fieldset class="group wide">
+              <legend>小牛翻译</legend>
+              <label class="choice"><input id="translate-sentences" type="checkbox" /><span>翻译查询的长句，以及词典里没有的词（中文译成英文，英文译成中文）</span></label>
+              <p class="group-note">译文显示在词条上方，可一键复制。要翻译的文字会发送到小牛翻译的服务器（api.niutrans.com）。</p>
+              <div class="key-fields">
+                <label class="key-field"><span>App ID</span><input id="niutrans-app-id" class="text-input" type="text" spellcheck="false" autocomplete="off" aria-label="小牛翻译 App ID" /></label>
+                <label class="key-field"><span>API Key</span><input id="niutrans-api-key" class="text-input" type="password" spellcheck="false" autocomplete="off" aria-label="小牛翻译 API Key" /></label>
+              </div>
+              <div class="key-actions">
+                <span id="niutrans-status" class="key-status"></span>
+                <button id="niutrans-save" class="button small primary" type="button">保存</button>
+                <button id="niutrans-clear" class="button small" type="button">清除</button>
+                <button id="niutrans-test" class="button small" type="button">测试翻译</button>
+              </div>
+              <p class="group-note plain">在 niutrans.com 注册后进入“控制台 → API 应用”，开通文本翻译即可得到 App ID 和 API Key（<button id="niutrans-console" class="link-button" type="button">打开小牛翻译控制台</button>）。密钥用 Windows 数据保护加密后保存在本机。</p>
+            </fieldset>
+            <fieldset class="group wide">
+              <legend>维基词典</legend>
+              <label class="choice"><input type="checkbox" data-wiki="en" /><span>English Wiktionary（en.wiktionary.org）</span></label>
+              <label class="choice"><input type="checkbox" data-wiki="zh" /><span>中文维基词典（zh.wiktionary.org）</span></label>
+              <p class="group-note plain">查单词时，维基词典的释义显示在本地词典之后，只保留英语、汉语等相关语言的部分。查询的词会发送到 wiktionary.org；内容按 CC BY-SA 4.0 协议授权。</p>
             </fieldset>
           </div>
         </section>

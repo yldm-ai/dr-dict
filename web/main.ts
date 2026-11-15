@@ -34,6 +34,12 @@ let suggestTimer = 0;
 let mode: 'history' | 'suggest' = 'history';
 let listKind: 'history' | 'favorites' = 'history';
 
+// Settings that change what a lookup shows (variants, translation, Wiktionary editions).
+function lookupSignature(): string {
+  const s = state.settings;
+  return `${s.chineseConversion}|${s.chineseVariant}|${s.translateSentences}|${s.wiktionary.join(',')}`;
+}
+
 function applyTheme(): void {
   applyAppearance();
   document.body.dataset.articleWidth = state.settings.articleWidth;
@@ -303,7 +309,7 @@ async function bootstrap(): Promise<void> {
   initSearch();
   initKeyboard();
   initWheelZoom();
-  initArticles({ focusSearch });
+  initArticles({ focusSearch, openOnlineSettings: () => openSettings('online') });
   initContextMenu({
     lookup: (word) => {
       focusSearch(word);
@@ -352,10 +358,12 @@ async function bootstrap(): Promise<void> {
   let previousChinese = '';
   subscribe('saved', () => {
     // Simplified/traditional lookup changes what a lookup finds, so ask again.
-    const signature = `${state.settings.chineseConversion}|${state.settings.chineseVariant}`;
+    const signature = lookupSignature();
     if (signature !== previousChinese) requery();
     previousChinese = signature;
   });
+  // A 小牛翻译 key saved or cleared changes what the shown sentence offers.
+  subscribe('niutrans', () => refresh());
   onSystemThemeChange(() => {
     applyTheme();
     refresh();
@@ -396,13 +404,14 @@ async function bootstrap(): Promise<void> {
     state.favorites = data.favorites ?? [];
     state.dataPath = data.dataPath;
     state.chineseAvailable = Boolean(data.chineseAvailable);
+    if (data.niutrans) state.niutrans = data.niutrans;
     setSystemDark(Boolean(data.systemDark));
   } catch (error) {
     toast((error as Error).message, 'error');
   }
   applyTheme();
   previous = `${effectiveTheme()}|${state.settings.invertArticles}|${state.settings.articleWidth}|${state.settings.traditionalVariant}`;
-  previousChinese = `${state.settings.chineseConversion}|${state.settings.chineseVariant}`;
+  previousChinese = lookupSignature();
   // A new search scope changes both the shown result and the suggestions.
   initScope({
     onChange: () => {

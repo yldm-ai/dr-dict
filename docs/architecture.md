@@ -66,6 +66,20 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
   - DR Dict 未运行时，用 `dr-dict.exe --lookup <词>` 启动：页面就绪、弹窗置顶后再显示（约 1.5 秒）。若已有实例在运行，`--lookup` 只把词转交给它，然后退出。
   - DR Dict 每次启动都会把自身路径写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\dr-dict.exe`，其他程序可以直接用 `ShellExecute("dr-dict.exe")` 启动它。这里记录的是最近一次运行的那个副本。
 
+## 在线来源
+
+网络请求都在 `Application::online_`（3 线程）上进行，不占用查词的 `queries_`。底层是 `app/src/http.cpp` 的 WinHTTP 客户端：只连白名单主机，不跟随重定向，响应限长，退出时 `HttpCancel` 关闭进行中的请求。协议与解析在 `engine/src/online.cpp`，以注入的 `HttpFetch` 工作，测试不联网。
+
+- **小牛翻译**（`NiuTrans`）：v2 文本接口，与 DR Music `native/niutrans.cpp` 相同的签名方式（`authStr` = 按键名排序的 `key=value`（含 apikey）用 `&` 连接后取 MD5）。
+  - 只做中英互译：汉字数 × 3 ≥ 拉丁字母数时中译英，否则英译中（`translation_direction`）。
+  - 页面判断“长句”（`web/online.ts` 的 `isSentence`），长句以及词典里查不到的词才翻译；译文在内存中按原文缓存。
+  - App ID / API Key 用 DPAPI 加密保存在 `<数据目录>/niutrans-key.bin`，页面只能拿到 `{configured, appId}`。
+- **维基词典**（`Wiktionary`）：思路参考 GoldenDict-ng `src/dict/mediawiki.cc`，独立实现。
+  - 用 `action=parse&redirects` 取页面，页面不存在时再试小写或首字母大写。超过 80 字的查询不发送。
+  - 只保留相关语言的二级章节（英文版保留 English、Translingual、Chinese；中文版保留漢語、英語、跨語言），一个都没有时整页保留。
+  - 改写时去掉脚本；条目链接改为 `entry://`，其他维基页面和以 `//`、`/` 开头的地址改为绝对 https 地址。
+  - 在 `https://dict.dr-dict.local/@wiki-<en|zh>/@article?word=…` 输出，页面带 CSP：只允许本程序的脚本，媒体只能来自 `*.wikimedia.org`。样式和折叠框由 `wiki.css` / `wiki.js` 提供。
+
 ## 安全边界
 
 - 每个 WebView 的主框架只允许导航到它自己的页面（主窗口 `index.html`，弹窗 `popup.html`）；子框架只允许 `dict.dr-dict.local`；禁止新窗口。

@@ -48,7 +48,13 @@ export type Settings = {
   scope: string[];
   // Pronunciation volume, 0–1.
   volume: number;
+  // 小牛翻译 translates sentences, and words no dictionary has (zh ↔ en).
+  translateSentences: boolean;
+  // Wiktionary editions shown after the dictionaries ("en", "zh").
+  wiktionary: string[];
 };
+/** 小牛翻译 credentials as the native side reports them; the key itself never reaches the page. */
+export type NiutransStatus = { configured: boolean; appId: string };
 export type HistoryItem = { word: string; at: number };
 
 export const state = {
@@ -69,7 +75,10 @@ export const state = {
     traditionalVariant: 't',
     scope: [],
     volume: 0.22,
+    translateSentences: true,
+    wiktionary: ['en'],
   } as Settings,
+  niutrans: { configured: false, appId: '' } as NiutransStatus,
   history: [] as HistoryItem[],
   favorites: [] as HistoryItem[],
   dataPath: '',
@@ -80,7 +89,7 @@ export const state = {
 
 // 'settings' fires for every change, including optimistic ones; 'saved' only once the native
 // side has stored them, which is when lookups see the new values.
-type Topic = 'dictionaries' | 'settings' | 'saved' | 'history' | 'favorites';
+type Topic = 'dictionaries' | 'settings' | 'saved' | 'history' | 'favorites' | 'niutrans';
 const subscribers = new Map<Topic, Set<() => void>>();
 export function subscribe(topic: Topic, handler: () => void): void {
   if (!subscribers.has(topic)) subscribers.set(topic, new Set());

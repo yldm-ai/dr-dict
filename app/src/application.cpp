@@ -3,6 +3,9 @@
 #include "dr/text.h"
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <dpapi.h>
+#include <algorithm>
+#include <cctype>
 #include <cwctype>
 #include <stdexcept>
 namespace dr
@@ -82,10 +85,114 @@ void Worker::enqueue(std::function<void()> work)
 Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell,
                          std::optional<LookupRequest> lookup)
     : pending_lookup_(std::move(lookup)), library_(std::move(root)), assets_(std::move(assets)),
-      initial_files_(std::move(files)), shell_override_(std::move(shell))
+      initial_files_(std::move(files)), shell_override_(std::move(shell)),
+      niutrans_(winhttp_fetch({NiuTrans::host}, http_cancel_)),
+      wiktionary_(winhttp_fetch({"en.wiktionary.org", "zh.wiktionary.org"}, http_cancel_))
 {
     // OpenCC data is installed beside the web assets (bin/<config>/opencc).
     library_.set_opencc_dir(assets_.parent_path() / "opencc");
+    load_niutrans_key();
+}
+
+namespace
+{
+fs::path niutrans_key_file(const fs::path &root)
+{
+    return root / "niutrans-key.bin";
+}
+// DPAPI (CryptProtectData) ties the secret to this Windows user, as in DR Music's
+// Application::seal / unseal. An empty secret removes the file.
+void seal(const fs::path &file, const std::string &secret)
+{
+    std::error_code ec;
+    if (secret.empty())
+    {
+        fs::remove(file, ec);
+        return;
+    }
+    DATA_BLOB input{static_cast<DWORD>(secret.size()), reinterpret_cast<BYTE *>(const_cast<char *>(secret.data()))};
+    DATA_BLOB output{};
+    if (!CryptProtectData(&input, L"DR Dict NiuTrans key", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output))
+        throw std::runtime_error("无法加密保存密钥");
+    std::string sealed(reinterpret_cast<char *>(output.pbData), output.cbData);
+    LocalFree(output.pbData);
+    write_atomic(file, sealed);
+}
+std::string unseal(const fs::path &file)
+{
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec) || fs::file_size(file, ec) > 64 * 1024)
+        return {};
+    try
+    {
+        auto sealed = read_file(file);
+        DATA_BLOB input{static_cast<DWORD>(sealed.size()), reinterpret_cast<BYTE *>(sealed.data())};
+        DATA_BLOB output{};
+        if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output))
+            return {};
+        std::string secret(reinterpret_cast<char *>(output.pbData), output.cbData);
+        SecureZeroMemory(output.pbData, output.cbData);
+        LocalFree(output.pbData);
+        return secret;
+    }
+    catch (const std::exception &)
+    {
+        return {};
+    }
+}
+} // namespace
+
+void Application::load_niutrans_key()
+{
+    const auto json = Json::parse(unseal(niutrans_key_file(library_.root())), nullptr, false);
+    niutrans_.set_credentials(json.is_object() ? json.value("appId", "") : "",
+                              json.is_object() ? json.value("apikey", "") : "");
+}
+void Application::save_niutrans_key(const std::string &app_id, const std::string &apikey)
+{
+    auto plain = [](const std::string &s) {
+        return s.size() <= 128 &&
+               std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_'; });
+    };
+    if (!plain(app_id) || !plain(apikey) || app_id.empty() != apikey.empty())
+        throw std::runtime_error("App ID 或 API Key 格式不正确");
+    seal(niutrans_key_file(library_.root()), app_id.empty() ? "" : Json{{"appId", app_id}, {"apikey", apikey}}.dump());
+    load_niutrans_key();
+}
+Json Application::niutrans_status() const
+{
+    return {{"configured", niutrans_.configured()}, {"appId", niutrans_.app_id()}};
+}
+
+void Application::online(const Json &id, const std::string &method, const Json &params, WebView &from)
+{
+    online_.enqueue([this, &from, id, method, params] {
+        try
+        {
+            Json result;
+            if (method == "translate")
+                result = niutrans_.translate(params.at("text").get<std::string>());
+            else if (method == "niutrans.test")
+                result = niutrans_.translate("今天天气很好，我们去公园散步吧。", false); // not from memory
+            else if (method == "wiki.lookup")
+            {
+                // {word, site} -> {found, id, site, name, title}; the frame then loads @wiki-<site>/@article.
+                const auto site_id = params.at("site").get<std::string>();
+                const auto *site = find_wiki_site(site_id);
+                if (!site)
+                    throw std::runtime_error("未知的维基词典");
+                auto article = wiktionary_.lookup(*site, params.at("word").get<std::string>());
+                result = {{"found", article.has_value()}, {"id", "@wiki-" + site->id}, {"site", site->id}, {"name", site->name}};
+                if (article)
+                    result["title"] = article->title;
+            }
+            reply(from, id, std::move(result));
+        }
+        catch (const std::exception &e)
+        {
+            reply_error(from, id, e.what());
+        }
+    });
 }
 
 void Application::reply(WebView &to, const Json &id, Json result)
@@ -135,8 +242,12 @@ std::string popup_word(const std::wstring &text)
     }
     while (!collapsed.empty() && collapsed.back() == L' ')
         collapsed.pop_back();
-    if (collapsed.size() > 256) // a paragraph, not a word: the popup still opens with its start
-        collapsed.resize(256);
+    // A paragraph is translated (小牛翻译 takes 5000 characters a request); beyond that the popup
+    // still opens with its start.
+    if (collapsed.size() > 4000)
+        collapsed.resize(4000);
+    if (!collapsed.empty() && IS_HIGH_SURROGATE(collapsed.back()))
+        collapsed.pop_back();
     return narrow(collapsed);
 }
 // The clipboard's text as popup_word; empty when it holds none. Another application may still
@@ -169,7 +280,8 @@ void Application::send_popup_lookup(const std::string &word)
                   {"dictionaries", library_.list()},
                   {"favorites", library_.favorites()},
                   {"systemDark", Window::system_dark()},
-                  {"chineseAvailable", library_.chinese_available()}};
+                  {"chineseAvailable", library_.chinese_available()},
+                  {"niutrans", niutrans_status()}};
     // The page looks the word up, renders, then asks for popup.show.
     window_.post([this, event] { popup_view_.send(event); });
 }
@@ -456,6 +568,18 @@ void Application::receive(const Json &request, WebView &from)
             import(id, {}, true);
             return;
         }
+        if (method == "translate" || method == "niutrans.test" || method == "wiki.lookup")
+        {
+            online(id, method, params, from);
+            return;
+        }
+        if (method == "niutrans.save")
+        {
+            // {appId, apikey}; both empty clears the saved key.
+            save_niutrans_key(params.at("appId").get<std::string>(), params.at("apikey").get<std::string>());
+            from.send({{"id", id}, {"result", niutrans_status()}});
+            return;
+        }
         if (method == "open.external")
         {
             auto url = params.at("url").get<std::string>();
@@ -566,7 +690,8 @@ void Application::receive(const Json &request, WebView &from)
                           // The page always sees prefers-color-scheme: light (see WebView::configure),
                           // so "follow system" takes the Windows theme from here.
                           {"systemDark", Window::system_dark()},
-                          {"chineseAvailable", library_.chinese_available()}};
+                          {"chineseAvailable", library_.chinese_available()},
+                          {"niutrans", niutrans_status()}};
                 if (!initial_files_.empty())
                 {
                     auto files = std::move(initial_files_);
@@ -659,7 +784,9 @@ void Application::resource(const std::wstring &wide_uri, std::function<void(Reso
 {
     auto uri = narrow(wide_uri);
     const std::string origin = narrow(dict_origin);
-    queries_.enqueue([this, uri, origin, respond = std::move(respond)] {
+    // Wiktionary frames (/@wiki-<site>/@article?word=…) may have to fetch the page first.
+    const bool wiki = uri.compare(origin.size(), 6, "@wiki-") == 0;
+    (wiki ? online_ : queries_).enqueue([this, uri, origin, respond = std::move(respond)] {
         ResourceReply reply;
         try
         {
@@ -673,7 +800,19 @@ void Application::resource(const std::wstring &wide_uri, std::function<void(Reso
             auto theme = query.count("theme") ? query["theme"] : std::string("light");
             if (theme != "dark" && theme != "light")
                 theme = "light";
-            if (id == "@background")
+            if (id.starts_with("@wiki-"))
+            {
+                const auto *site = find_wiki_site(id.substr(6));
+                if (site && route == "@article")
+                {
+                    if (auto article = wiktionary_.lookup(*site, query["word"]))
+                        reply = {200, "text/html; charset=utf-8", wiki_page(*site, *article, theme)};
+                    else
+                        reply = {404, "text/html; charset=utf-8",
+                                 "<!DOCTYPE html><meta charset=\"utf-8\"><p>" + html_escape(site->name) + " 没有这个词条。</p>"};
+                }
+            }
+            else if (id == "@background")
             {
                 // The interface background image (https://dict.dr-dict.local/@background/<name>).
                 if (auto image = library_.background_image(route))
@@ -756,6 +895,8 @@ int Application::run(HINSTANCE instance)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    // Requests still in flight end at once, so the workers join without waiting for a server.
+    http_cancel_->cancel();
     return static_cast<int>(msg.wParam);
 }
 } // namespace dr
