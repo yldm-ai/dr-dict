@@ -520,9 +520,7 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
             for (const auto &file : request["files"])
                 if (file.is_string())
                     files.emplace_back(widen(file.get<std::string>()));
-        HWND main = window_.handle();
-        ShowWindow(main, IsIconic(main) ? SW_RESTORE : SW_SHOW);
-        SetForegroundWindow(main);
+        show_main();
         if (!files.empty())
             window_.post([this, files = std::move(files)] { import(nullptr, files); });
     };
@@ -809,9 +807,7 @@ void Application::receive(const Json &request, WebView &from)
                 auto word = params.value("word", std::string());
                 if (!popup_.pinned())
                     popup_.hide();
-                if (IsIconic(window_.handle()))
-                    ShowWindow(window_.handle(), SW_RESTORE);
-                SetForegroundWindow(window_.handle());
+                show_main();
                 if (!word.empty())
                     webview_.send({{"event", "lookup-word"}, {"word", word}});
             }
@@ -1001,6 +997,22 @@ void Application::resource(const std::wstring &wide_uri, std::function<void(Reso
     });
 }
 
+void Application::show_main()
+{
+    HWND main = window_.handle();
+    if (!IsWindowVisible(main))
+        ShowWindow(main, SW_SHOW); // keeps a maximized window maximized
+    if (IsIconic(main))
+        ShowWindow(main, SW_RESTORE);
+    SetForegroundWindow(main);
+}
+
+void Application::quit()
+{
+    tray_.remove();
+    DestroyWindow(window_.handle());
+}
+
 int Application::run(HINSTANCE instance)
 {
     auto settings = library_.settings();
@@ -1010,6 +1022,18 @@ int Application::run(HINSTANCE instance)
                         theme_mode(settings.value("theme", std::string("system")))))
         return 1;
     window_.set_title(L"DR Dict");
+    // Closing the window keeps DR Dict in the notification area (Ctrl+C+C and requests from other
+    // programs keep working); only the tray menu's “退出” quits. Without a tray icon (no shell)
+    // closing quits as before.
+    tray_.menu = {{L"显示主窗口", L'', [this] { show_main(); }},
+                  {},
+                  {L"退出", L'', [this] { quit(); }}};
+    tray_.palette = [this] {
+        return TrayPalette{window_.resolved_theme()[0] == 'd', window_.background(), window_.text_color()};
+    };
+    tray_.on_activate = [this] { show_main(); };
+    if (tray_.create(instance, IDI_DR_DICT, L"DR Dict"))
+        window_.on_close = [this] { ShowWindow(window_.handle(), SW_HIDE); };
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
     window_.on_toggle_borderless = [this] {
         window_.post([this] {

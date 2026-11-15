@@ -564,19 +564,16 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     case WM_ERASEBKGND:
         return 1;
     case WM_CLOSE:
+        // The close button, Alt+F4 and the taskbar's “关闭窗口” all arrive here; with on_close set
+        // the window stays alive and the handler decides (DR Dict hides it to the tray).
         if (on_close)
         {
+            caption_tip(HTNOWHERE);
             on_close();
-            SetTimer(hwnd_, 42, 1800, nullptr);
             return 0;
         }
         break;
     case WM_TIMER:
-        if (w == 42)
-        {
-            DestroyWindow(hwnd_);
-            return 0;
-        }
         if (w == caption_tip_timer)
         {
             KillTimer(hwnd_, caption_tip_timer);

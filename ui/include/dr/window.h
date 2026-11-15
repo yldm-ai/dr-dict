@@ -36,6 +36,8 @@ class Window
     std::function<void(bool dark)> on_system_theme;
     /** The theme's window background (0xRRGGBB), equal to the page's --bg. */
     UINT32 background() const { return caption_background_; }
+    /** The theme's text colour (0xRRGGBB), equal to the page's --text. */
+    UINT32 text_color() const { return caption_text_; }
     /** "light" or "dark", with "system" resolved from the Windows app theme. */
     const char *resolved_theme() const { return resolved_theme_; }
     void set_fullscreen(bool enabled);
@@ -52,6 +54,7 @@ class Window
     float dim_alpha() const { return resolved_theme_[0] == 'd' ? 0.5f : 0.3f; }
     void post(std::function<void()> action);
     std::function<void()> on_resize;
+    // Replaces closing (WM_CLOSE) when set: the window is not destroyed.
     std::function<void()> on_close;
     std::function<void()> on_toggle_borderless;
     // Hover tip for a Direct2D caption button: its text and client-pixel rectangle, or an

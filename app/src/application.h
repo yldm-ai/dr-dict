@@ -1,5 +1,6 @@
 #pragma once
 #include "dr/library.h"
+#include "dr/tray.h"
 #include "dr/window.h"
 #include "agent_runner.h"
 #include "copy_hotkey.h"
@@ -92,7 +93,12 @@ class Application
     // AI 助查 through local agent CLIs (agent.*), as in DR Reader. Answers stream to the main
     // window as `agent` events keyed by the page's request id.
     bool receive_agent(const Json &id, const std::string &method, const Json &params, WebView &from);
+    // The main window comes back from the tray (or from behind other windows) and takes focus.
+    void show_main();
+    // Really quits: the close button only hides the window to the tray.
+    void quit();
     Window window_;
+    Tray tray_;
     WebView webview_;
     Popup popup_;
     WebView popup_view_;
