@@ -60,6 +60,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
         std::vector<dr::fs::path> files;
         std::string shell;
         std::optional<dr::LookupRequest> lookup;
+        std::optional<RECT> caret;
+        bool keyboard = false;
         for (int i = 1; i < argc; ++i)
         {
             std::wstring arg = argv[i];
@@ -67,10 +69,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
                 root = argv[++i];
             else if (arg == L"--lookup" && i + 1 < argc)
             {
-                // The popup opens beside the pointer, as for Ctrl+C+C.
+                // The popup opens beside the pointer, as for Ctrl+C+C, unless --caret says where
+                // the text caret is (an input method's hotkey).
                 lookup = dr::LookupRequest{dr::narrow(argv[++i])};
-                GetCursorPos(&lookup->at);
+                GetCursorPos(&lookup->anchor.point);
             }
+            else if (arg == L"--caret" && i + 1 < argc)
+            {
+                caret = dr::parse_caret_argument(argv[++i]);
+                if (!caret)
+                    throw std::runtime_error("--caret 应为 left,top,right,bottom");
+            }
+            else if (arg == L"--keyboard")
+                keyboard = true;
             else if (arg == L"--shell" && i + 1 < argc)
             {
                 shell = dr::narrow(argv[++i]);
@@ -83,6 +94,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
                 files.emplace_back(arg);
         }
         LocalFree(argv);
+        if (lookup)
+        {
+            lookup->anchor.caret = caret;
+            lookup->anchor.keyboard = keyboard;
+        }
         root = dr::fs::absolute(root);
         // One instance per data folder: a second one would keep its own copy of the history and
         // favourites and add a second Ctrl+C+C hook, so popup lookups could land in a main window
@@ -92,8 +108,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
         swprintf_s(mutex_name, L"Local\\DRDict.Instance.%zx", tag);
         HANDLE instance_mutex = CreateMutexW(nullptr, FALSE, mutex_name);
         const bool running = instance_mutex && GetLastError() == ERROR_ALREADY_EXISTS;
-        if (lookup && send_request(find_popup(tag), dr::lookup_request,
-                                   dr::Json{{"word", lookup->word}, {"x", lookup->at.x}, {"y", lookup->at.y}}.dump()))
+        if (lookup && send_request(find_popup(tag), dr::lookup_request, dr::lookup_payload(*lookup)))
         {
             CloseHandle(instance_mutex);
             CoUninitialize();

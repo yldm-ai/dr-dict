@@ -63,7 +63,8 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
 - **供其他程序调用**（DR Reader 选词菜单的“查词典”）：
   - 按窗口类 `DrDictPopup` 找到弹窗宿主，发送 `WM_COPYDATA`：`dwData = 0x4B4C5244`（"DRLK"），数据是 UTF-8 JSON `{"word": "...", "x": 屏幕 x, "y": 屏幕 y}`，弹窗在该点旁打开。常量见 `app/src/popup.h`。
   - 发送方先对 DR Dict 进程调用 `AllowSetForegroundWindow`，弹窗才能取得焦点；uiAccess 版本用 `ChangeWindowMessageFilterEx` 放行 `WM_COPYDATA`。
-  - DR Dict 未运行时，用 `dr-dict.exe --lookup <词>` 启动：页面就绪、弹窗置顶后再显示（约 1.5 秒）。若已有实例在运行，`--lookup` 只把词转交给它，然后退出。
+  - 由键盘唤起的查询（水杉输入法的查词快捷键）另带两个可选字段：`"caret": [left, top, right, bottom]` 是文字光标所在行的屏幕矩形，弹窗像候选窗一样开在它下方，放不下时开在上方；`"keyboard": true` 表示不是鼠标唤起的，弹窗不按鼠标位置自动关闭（鼠标多半停在远处，按 Ctrl+C+C 的规则会在第一次检测时就关掉），仍在 Esc、点击别处或其他窗口激活时关闭。
+  - DR Dict 未运行时，用 `dr-dict.exe --lookup <词> [--caret l,t,r,b] [--keyboard]` 启动：页面就绪、弹窗置顶后再显示（约 1.5 秒）。若已有实例在运行，`--lookup` 只把词（连同上面两项）转交给它，然后退出。
   - DR Dict 每次启动都会把自身路径写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\dr-dict.exe`，其他程序可以直接用 `ShellExecute("dr-dict.exe")` 启动它。这里记录的是最近一次运行的那个副本。
 
 ## 在线来源

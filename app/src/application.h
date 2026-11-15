@@ -41,12 +41,20 @@ inline size_t instance_tag(const fs::path &root)
     return std::hash<std::wstring>{}(text) | 1; // never 0, which GetPropW returns for "none"
 }
 
-// A word to show in the popup beside a screen point (from --lookup or another program).
+// A word to show in the popup beside a screen point or below a caret (from --lookup or another
+// program; the fields are described in popup.h).
 struct LookupRequest
 {
     std::string word;
-    POINT at{};
+    PopupAnchor anchor;
 };
+// The lookup_request payload for a request, and back; parsing fails without a word. A payload
+// without x/y opens beside the pointer.
+std::string lookup_payload(const LookupRequest &request);
+std::optional<LookupRequest> parse_lookup_payload(std::string_view payload);
+// "left,top,right,bottom" (--caret) as a rectangle; nullopt unless four integers with
+// left <= right and top <= bottom.
+std::optional<RECT> parse_caret_argument(const std::wstring &text);
 
 class Application
 {
@@ -89,7 +97,7 @@ class Application
     Popup popup_;
     WebView popup_view_;
     CopyHotkey hotkey_;
-    POINT popup_cursor_{};
+    PopupAnchor popup_anchor_{};
     std::optional<LookupRequest> pending_lookup_;
     Library library_;
     fs::path assets_;

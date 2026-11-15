@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <windows.h>
 namespace dr
@@ -8,6 +9,12 @@ namespace dr
 // class and sending it WM_COPYDATA with dwData = lookup_request and UTF-8 JSON
 // {"word": "...", "x": screen x, "y": screen y} — the point the popup opens beside. The sender
 // should AllowSetForegroundWindow DR Dict's process first, so the popup may take focus.
+// Two optional fields are for lookups summoned from the keyboard (an input method's hotkey):
+//   "caret": [left, top, right, bottom] — the text caret's line in screen pixels; the popup opens
+//            below it (above when there is no room), like a candidate window, instead of beside x/y;
+//   "keyboard": true — not summoned by the pointer, so the popup does not hide when the pointer is
+//            away from it; Esc, a click elsewhere or another window taking focus still close it.
+// The same goes on the command line: dr-dict.exe --lookup <word> [--caret l,t,r,b] [--keyboard].
 inline constexpr wchar_t popup_class[] = L"DrDictPopup";
 inline constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK"
 // DR Dict started again with the same data folder: {"files": ["utf-8 path", ...]}. The running
@@ -17,13 +24,23 @@ inline constexpr ULONG_PTR open_request = 0x4E504F44; // "DOPN"
 // request reaches the instance that owns the same history and settings.
 inline constexpr wchar_t instance_property[] = L"DRDict.Instance";
 
+// Where the popup opens and how it was summoned (see the request fields above).
+struct PopupAnchor
+{
+    POINT point{};              // beside this point (the pointer, or the point a program sent)
+    std::optional<RECT> caret;  // below (or above) this caret line instead, when known
+    bool keyboard = false;      // summoned by a key: no pointer-leave auto-hide
+};
+
 // The Ctrl+C+C lookup popup's host window: borderless, resizable from a thin edge around the
 // WebView, shown next to the mouse pointer and kept above other windows.
 //
 // Behaviour after GoldenDict-ng's ScanPopup (src/ui/scanpopup.cc), implemented independently:
 // it opens beside the pointer (to the right and below, flipped when there is no room); while
 // unpinned it hides when the pointer moves away before ever entering it, when the pointer leaves
-// it for a moment, when another window is activated, or on Esc. A pinned popup stays put.
+// it for a moment, when another window is activated, or on Esc. A pinned popup stays put. Summoned
+// from the keyboard (PopupAnchor::keyboard) the pointer rules do not apply: the pointer is wherever
+// the user left it, typically far from the caret the popup opens at.
 //
 // TOPMOST and WebView2 (from MSIME-Windows, windows_webview2.cpp): in a uiAccess process a host
 // that is already TOPMOST makes CreateCoreWebView2Controller fail with E_INVALIDARG (UIPI blocks
@@ -38,7 +55,9 @@ class Popup
     HWND handle() const { return hwnd_; }
 
     /** Shows the popup beside `cursor` (screen pixels), or where it is if it is already shown. */
-    void show_near(POINT cursor);
+    void show_near(POINT cursor) { show_at(PopupAnchor{cursor}); }
+    /** Same, at `anchor`: below its caret line when it has one, beside its point otherwise. */
+    void show_at(const PopupAnchor &anchor);
     void hide();
     bool visible() const { return hwnd_ && IsWindowVisible(hwnd_); }
     void set_pinned(bool pinned);
@@ -74,6 +93,7 @@ class Popup
     HWND previous_ = nullptr; // the window that had focus before the popup took it
     HBRUSH brush_ = nullptr;
     bool pinned_ = false;
+    bool keyboard_ = false; // summoned by a key: the pointer does not hide it
     bool topmost_ = false;
     int width_ = 360, height_ = 420;
     // Pointer tracking while unpinned.

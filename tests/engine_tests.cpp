@@ -496,6 +496,26 @@ int main()
         CHECK(html.find("<p>x=\"y\" stays</p>") != std::string::npos);
 
         CHECK(!parse_wiki_reply(en, R"({"error":{"code":"missingtitle"}})"));
+        // Real en/zh "我" pages contain adjacent floated tables and inline-floated wrappers.
+        // Preserve these templates (including nested cells and styles) for wiki.js to lay out
+        // as wrapping illustration rows; script removal and link rewriting must not break them.
+        const std::string layout = wrapper +
+            "<table class=\"floatright character-info\"><tbody><tr><td>U+6211</td></tr></tbody></table>"
+            "<div class=\"mw-heading mw-heading2\"><h2 id=\"Translingual\">Translingual</h2></div>"
+            "<table class=\"floatright wikitable\"><tr><td><img src=\"//upload.wikimedia.org/stroke.png\"></td></tr></table>"
+            "<div style=\"float:right\"><table><tr><td>筆順</td></tr></table></div>"
+            "<h3>Han character</h3><p>我：完整释义</p></div>";
+        auto layout_article = parse_wiki_reply(en, Json{{"parse", {{"title", "我"}, {"text", layout}}}}.dump());
+        CHECK(layout_article.has_value());
+        if (layout_article)
+        {
+            const auto layout_frame = wiki_page(en, *layout_article, "light");
+            CHECK(layout_frame.find("class=\"floatright character-info\"") != std::string::npos);
+            CHECK(layout_frame.find("<div style=\"float:right\"><table>") != std::string::npos);
+            CHECK(layout_frame.find("https://upload.wikimedia.org/stroke.png") != std::string::npos);
+            CHECK(layout_frame.find("<p>我：完整释义</p>") != std::string::npos);
+            CHECK(layout_frame.find("https://app.dr-dict.local/wiki.js") != std::string::npos);
+        }
         auto article = parse_wiki_reply(en, Json{{"parse", {{"title", "hello"}, {"pageid", 1}, {"text", page}}}}.dump());
         CHECK(article && article->title == "hello" && article->html.find("<p>fr</p>") == std::string::npos);
         if (article)

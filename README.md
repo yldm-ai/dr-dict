@@ -62,7 +62,7 @@ pwsh -File .\scripts\install-uiaccess.ps1
 
 测试证书只能用于本机，不要对外分发用它签名的程序。
 
-命令行参数：`dr-dict.exe [--data-dir <目录>] [--shell mica|direct2d] [--lookup <词>] [词典文件或文件夹...]`。`--lookup` 在鼠标旁的弹窗中查词；若 DR Dict 已在运行，就交给已运行的实例处理。DR Reader 选词菜单中的“查词典”就是这样调用的（见 [docs/architecture.md](docs/architecture.md)）。默认数据目录为 `%LOCALAPPDATA%\DRDict`。
+命令行参数：`dr-dict.exe [--data-dir <目录>] [--shell mica|direct2d] [--lookup <词> [--caret l,t,r,b] [--keyboard]] [词典文件或文件夹...]`。`--lookup` 在鼠标旁的弹窗中查词；若 DR Dict 已在运行，就交给已运行的实例处理。DR Reader 选词菜单中的“查词典”就是这样调用的（见 [docs/architecture.md](docs/architecture.md)）。`--caret` 给出文字光标所在行的屏幕矩形，弹窗开在它下方（放不下时在上方）；`--keyboard` 表示由按键唤起，弹窗不随鼠标移开而关闭。水杉输入法的查词快捷键用的就是这两项。默认数据目录为 `%LOCALAPPDATA%\DRDict`。
 
 ## 目录
 

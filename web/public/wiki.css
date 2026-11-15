@@ -1,7 +1,7 @@
 /* Wiktionary articles (https://dict.dr-dict.local/@wiki-<site>/@article), after frame.css. The
    parser output comes without Wikimedia's skin, so this gives it a plain reading layout; inline
    TemplateStyles in the page still style the templates themselves. */
-.dr-wiki { overflow-wrap: break-word; }
+.dr-wiki { overflow-wrap: break-word; display: flow-root; }
 .dr-wiki h2, .dr-wiki h3, .dr-wiki h4, .dr-wiki h5 { margin: 18px 0 6px; color: #1f1e1b; line-height: 1.35; }
 .dr-wiki h2 { font-size: 18px; padding-bottom: 4px; border-bottom: 1px solid #ebebe9; }
 .dr-wiki h3 { font-size: 16px; }
@@ -23,8 +23,24 @@
 .dr-wiki .h-usage-example, .dr-wiki .e-example { color: #5f5e5a; }
 /* Boxes that only point to sister projects, editor notices and empty template slots. */
 .dr-wiki .sister-wikipedia, .dr-wiki .sister-project, .dr-wiki .noprint, .dr-wiki .mw-empty-elt,
-.dr-wiki .checktrans, .dr-wiki .maintenance-line, .dr-wiki .mw-editsection, .dr-wiki .catlinks { display: none; }
+.dr-wiki .checktrans, .dr-wiki .maintenance-line, .dr-wiki .mw-editsection, .dr-wiki .catlinks { display: none !important; }
 .dr-wiki .floatright { float: right; margin: 0 0 8px 12px; }
+/* Consecutive floats become an illustration row (wiki.js), so a cluster of stroke-order images
+   cannot squeeze the definition into a few characters. Keep their natural sizes and wrap. */
+.dr-wiki .dr-wiki-media {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px;
+  clear: both; max-width: 100%; margin: 8px 0 12px;
+}
+.dr-wiki .dr-wiki-media > * {
+  float: none !important; clear: none !important; margin: 0 !important;
+  min-width: 0; max-width: 100%;
+}
+.dr-wiki .dr-wiki-table {
+  max-width: 100%; min-width: 0; overflow-x: auto; margin: 8px 0;
+  overscroll-behavior-x: contain;
+}
+.dr-wiki .dr-wiki-table > table { float: none !important; margin: 0 !important; }
+.dr-wiki .mw-heading2 { clear: both; }
 /* Collapsible boxes (translations, phrasebook, inflection tables): closed until their header is
    clicked (wiki.js), as on the site. */
 .dr-wiki .NavFrame { margin: 6px 0; border: 1px solid #ebebe9; border-radius: 6px; background: none !important; }

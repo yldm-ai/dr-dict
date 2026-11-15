@@ -6,6 +6,7 @@
 #include <dpapi.h>
 #include <algorithm>
 #include <cctype>
+#include <cwchar>
 #include <cwctype>
 #include <stdexcept>
 namespace dr
@@ -391,6 +392,62 @@ void Application::send_popup_lookup(const std::string &word)
     window_.post([this, event] { popup_view_.send(event); });
 }
 
+std::string lookup_payload(const LookupRequest &request)
+{
+    Json payload{{"word", request.word}, {"x", request.anchor.point.x}, {"y", request.anchor.point.y}};
+    if (const auto &caret = request.anchor.caret)
+        payload["caret"] = Json::array({caret->left, caret->top, caret->right, caret->bottom});
+    if (request.anchor.keyboard)
+        payload["keyboard"] = true;
+    return payload.dump();
+}
+
+std::optional<LookupRequest> parse_lookup_payload(std::string_view text)
+{
+    auto request = Json::parse(text, nullptr, false);
+    if (!request.is_object() || !request.contains("word") || !request["word"].is_string())
+        return std::nullopt;
+    LookupRequest result{request["word"].get<std::string>()};
+    GetCursorPos(&result.anchor.point);
+    if (request.contains("x") && request["x"].is_number_integer() && request.contains("y") &&
+        request["y"].is_number_integer())
+        result.anchor.point = {request["x"].get<LONG>(), request["y"].get<LONG>()};
+    if (request.contains("caret") && request["caret"].is_array() && request["caret"].size() == 4 &&
+        std::all_of(request["caret"].begin(), request["caret"].end(),
+                    [](const Json &value) { return value.is_number_integer(); }))
+    {
+        const auto &c = request["caret"];
+        const RECT caret{c[0].get<LONG>(), c[1].get<LONG>(), c[2].get<LONG>(), c[3].get<LONG>()};
+        if (caret.left <= caret.right && caret.top <= caret.bottom)
+            result.anchor.caret = caret;
+    }
+    result.anchor.keyboard = request.contains("keyboard") && request["keyboard"].is_boolean() &&
+                             request["keyboard"].get<bool>();
+    return result;
+}
+
+std::optional<RECT> parse_caret_argument(const std::wstring &text)
+{
+    long values[4]{};
+    size_t start = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+        const size_t end = i < 3 ? text.find(L',', start) : text.size();
+        if (end == std::wstring::npos || end == start)
+            return std::nullopt;
+        const std::wstring part = text.substr(start, end - start);
+        wchar_t *stop = nullptr;
+        values[i] = std::wcstol(part.c_str(), &stop, 10);
+        if (!stop || *stop != L'\0')
+            return std::nullopt;
+        start = end + 1;
+    }
+    const RECT caret{values[0], values[1], values[2], values[3]};
+    if (caret.left > caret.right || caret.top > caret.bottom)
+        return std::nullopt;
+    return caret;
+}
+
 void Application::request_lookup(LookupRequest request)
 {
     request.word = popup_word(widen(request.word));
@@ -403,7 +460,7 @@ void Application::request_lookup(LookupRequest request)
         pending_lookup_ = std::move(request);
         return;
     }
-    popup_cursor_ = request.at;
+    popup_anchor_ = request.anchor;
     queries_.enqueue([this, word = std::move(request.word)] { send_popup_lookup(word); });
 }
 
@@ -416,7 +473,8 @@ void Application::copied_twice()
     GetWindowThreadProcessId(GetForegroundWindow(), &process);
     if (process == GetCurrentProcessId() && GetForegroundWindow() != popup_.handle())
         return;
-    GetCursorPos(&popup_cursor_);
+    popup_anchor_ = {};
+    GetCursorPos(&popup_anchor_.point);
     queries_.enqueue([this] {
         // The first Ctrl+C was delivered before ours; give the application a moment to put
         // the selection on the clipboard.
@@ -450,16 +508,9 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
             request_lookup(std::move(*request));
     };
     popup_.on_request = [this](std::string_view payload) {
-        // {"word": "...", "x": …, "y": …} from another program (see popup.h).
-        auto request = Json::parse(payload, nullptr, false);
-        if (!request.is_object() || !request.contains("word") || !request["word"].is_string())
-            return;
-        POINT at{};
-        GetCursorPos(&at);
-        if (request.contains("x") && request["x"].is_number_integer() && request.contains("y") &&
-            request["y"].is_number_integer())
-            at = {request["x"].get<LONG>(), request["y"].get<LONG>()};
-        request_lookup({request["word"].get<std::string>(), at});
+        // {"word": "...", "x": …, "y": …, "caret": […], "keyboard": …} from another program (see popup.h).
+        if (auto request = parse_lookup_payload(payload))
+            request_lookup(std::move(*request));
     };
     // DR Dict started again (see main.cpp): come to the front and take the files it was given.
     popup_.on_open = [this](std::string_view payload) {
@@ -735,7 +786,7 @@ void Application::receive(const Json &request, WebView &from)
         {
             Json result = true;
             if (method == "popup.show")
-                popup_.show_near(popup_cursor_); // the page has rendered the new lookup
+                popup_.show_at(popup_anchor_); // the page has rendered the new lookup
             else if (method == "popup.hide")
                 popup_.hide();
             else if (method == "popup.pin")

@@ -100,12 +100,16 @@ void Popup::set_colors(UINT32 background, bool dark)
     InvalidateRect(hwnd_, nullptr, TRUE);
 }
 
-void Popup::show_near(POINT cursor)
+void Popup::show_at(const PopupAnchor &anchor)
 {
     const bool shown = visible();
     if (!shown || !pinned_)
     {
-        HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        const POINT cursor = anchor.point;
+        const RECT *caret = anchor.caret ? &*anchor.caret : nullptr;
+        // The caret's monitor when there is one: the pointer may be on another screen.
+        const POINT reference = caret ? POINT{caret->left, caret->bottom} : cursor;
+        HMONITOR monitor = MonitorFromPoint(reference, MONITOR_DEFAULTTONEAREST);
         MONITORINFO info{sizeof(info)};
         GetMonitorInfoW(monitor, &info);
         const RECT work = info.rcWork;
@@ -113,18 +117,35 @@ void Popup::show_near(POINT cursor)
         GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
         const int w = std::min<int>(MulDiv(width_, dpi_x, 96), work.right - work.left);
         const int h = std::min<int>(MulDiv(height_, dpi_x, 96), work.bottom - work.top);
-        const int gap_x = MulDiv(4, dpi_x, 96), gap_y = MulDiv(15, dpi_x, 96);
-        // Right of the pointer, else left of it, else centred; below it, else above, else centred.
-        int x = cursor.x + gap_x;
-        if (x + w > work.right)
-            x = cursor.x - gap_x - w >= work.left ? cursor.x - gap_x - w : work.left + (work.right - work.left - w) / 2;
-        int y = cursor.y + gap_y;
-        if (y + h > work.bottom)
-            y = cursor.y - gap_y - h >= work.top ? cursor.y - gap_y - h : work.top + (work.bottom - work.top - h) / 2;
+        int x = 0, y = 0;
+        if (caret)
+        {
+            // Where an input method's candidate window goes: left edge on the caret, just below
+            // its line, else just above it; pushed back inside the work area horizontally.
+            const int gap = MulDiv(3, dpi_x, 96);
+            x = std::clamp<int>(caret->left, work.left, std::max<int>(work.left, work.right - w));
+            y = caret->bottom + gap;
+            if (y + h > work.bottom)
+                y = caret->top - gap - h >= work.top ? caret->top - gap - h : std::max<int>(work.top, work.bottom - h);
+        }
+        else
+        {
+            const int gap_x = MulDiv(4, dpi_x, 96), gap_y = MulDiv(15, dpi_x, 96);
+            // Right of the pointer, else left of it, else centred; below it, else above, else centred.
+            x = cursor.x + gap_x;
+            if (x + w > work.right)
+                x = cursor.x - gap_x - w >= work.left ? cursor.x - gap_x - w
+                                                      : work.left + (work.right - work.left - w) / 2;
+            y = cursor.y + gap_y;
+            if (y + h > work.bottom)
+                y = cursor.y - gap_y - h >= work.top ? cursor.y - gap_y - h
+                                                     : work.top + (work.bottom - work.top - h) / 2;
+        }
         SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     }
     else
         SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    keyboard_ = anchor.keyboard;
     if (!shown)
         previous_ = GetForegroundWindow();
     shown_at_ = GetTickCount64();
@@ -139,8 +160,12 @@ void Popup::show_near(POINT cursor)
         on_moved();
     entered_ = false;
     outside_since_ = 0;
-    if (!pinned_)
+    // Keyboard-summoned: the pointer is wherever the user left it, usually far from the caret,
+    // so watching it would hide the popup on the first tick.
+    if (!pinned_ && !keyboard_)
         SetTimer(hwnd_, track_timer, track_interval_ms, nullptr);
+    else
+        KillTimer(hwnd_, track_timer);
 }
 
 void Popup::hide()
@@ -163,7 +188,7 @@ void Popup::set_pinned(bool pinned)
     pinned_ = pinned;
     if (pinned)
         KillTimer(hwnd_, track_timer);
-    else if (visible())
+    else if (visible() && !keyboard_)
     {
         // Unpinning a popup the pointer is over: it hides once the pointer leaves.
         entered_ = true;
@@ -192,7 +217,7 @@ void Popup::schedule_topmost(UINT delay_ms)
 
 void Popup::track_pointer()
 {
-    if (pinned_ || !visible())
+    if (pinned_ || keyboard_ || !visible())
     {
         KillTimer(hwnd_, track_timer);
         return;
