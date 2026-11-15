@@ -16,17 +16,23 @@ void register_app_path(const std::wstring &executable)
                    static_cast<DWORD>((executable.size() + 1) * sizeof(wchar_t)));
     RegCloseKey(key);
 }
-// --lookup with DR Dict already running: hand the word to that instance's popup (see popup.h).
-bool forward_lookup(const std::string &word, POINT at)
+// The popup host of the instance using this data folder (see popup.h's instance_property).
+HWND find_popup(size_t tag)
 {
-    HWND popup = FindWindowW(dr::popup_class, nullptr);
+    for (HWND popup = nullptr; (popup = FindWindowExW(nullptr, popup, dr::popup_class, nullptr));)
+        if (reinterpret_cast<size_t>(GetPropW(popup, dr::instance_property)) == tag)
+            return popup;
+    return nullptr;
+}
+// Hands a request to the running instance's popup host, which may then take the foreground.
+bool send_request(HWND popup, ULONG_PTR kind, const std::string &payload)
+{
     if (!popup)
         return false;
     DWORD process = 0;
     GetWindowThreadProcessId(popup, &process);
     AllowSetForegroundWindow(process);
-    const auto payload = dr::Json{{"word", word}, {"x", at.x}, {"y", at.y}}.dump();
-    COPYDATASTRUCT data{dr::lookup_request, static_cast<DWORD>(payload.size()), const_cast<char *>(payload.data())};
+    COPYDATASTRUCT data{kind, static_cast<DWORD>(payload.size()), const_cast<char *>(payload.data())};
     DWORD_PTR handled = 0;
     return SendMessageTimeoutW(popup, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 3000,
                                &handled) &&
@@ -77,8 +83,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
                 files.emplace_back(arg);
         }
         LocalFree(argv);
-        if (lookup && forward_lookup(lookup->word, lookup->at))
+        root = dr::fs::absolute(root);
+        // One instance per data folder: a second one would keep its own copy of the history and
+        // favourites and add a second Ctrl+C+C hook, so popup lookups could land in a main window
+        // the user is not looking at. A second start hands its work to the running instance.
+        const size_t tag = dr::instance_tag(root);
+        wchar_t mutex_name[64];
+        swprintf_s(mutex_name, L"Local\\DRDict.Instance.%zx", tag);
+        HANDLE instance_mutex = CreateMutexW(nullptr, FALSE, mutex_name);
+        const bool running = instance_mutex && GetLastError() == ERROR_ALREADY_EXISTS;
+        if (lookup && send_request(find_popup(tag), dr::lookup_request,
+                                   dr::Json{{"word", lookup->word}, {"x", lookup->at.x}, {"y", lookup->at.y}}.dump()))
         {
+            CloseHandle(instance_mutex);
+            CoUninitialize();
+            return 0;
+        }
+        if (running)
+        {
+            dr::Json paths = dr::Json::array();
+            for (const auto &file : files)
+                paths.push_back(dr::narrow(dr::fs::absolute(file).wstring()));
+            const auto payload = dr::Json{{"files", paths}}.dump();
+            // The running instance creates its popup right after its main window; give one that is
+            // still starting a moment.
+            for (int attempt = 0; attempt < 50 && !send_request(find_popup(tag), dr::open_request, payload); ++attempt)
+                Sleep(100);
+            CloseHandle(instance_mutex);
             CoUninitialize();
             return 0;
         }

@@ -345,9 +345,15 @@ LRESULT Popup::handle(UINT message, WPARAM w, LPARAM l)
     case WM_COPYDATA: {
         // A lookup from another program; the payload is only valid during this message.
         const auto *data = reinterpret_cast<const COPYDATASTRUCT *>(l);
-        if (!data || data->dwData != lookup_request || !data->lpData || data->cbData > 64 * 1024 || !on_request)
+        if (!data || !data->lpData || data->cbData > 1024 * 1024)
             return FALSE;
-        on_request(std::string_view(static_cast<const char *>(data->lpData), data->cbData));
+        const std::string_view payload(static_cast<const char *>(data->lpData), data->cbData);
+        if (data->dwData == lookup_request && on_request && payload.size() <= 64 * 1024)
+            on_request(payload);
+        else if (data->dwData == open_request && on_open)
+            on_open(payload);
+        else
+            return FALSE;
         return TRUE;
     }
     }

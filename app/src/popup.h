@@ -10,6 +10,12 @@ namespace dr
 // should AllowSetForegroundWindow DR Dict's process first, so the popup may take focus.
 inline constexpr wchar_t popup_class[] = L"DrDictPopup";
 inline constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK"
+// DR Dict started again with the same data folder: {"files": ["utf-8 path", ...]}. The running
+// instance comes to the front and imports the files, and the new process exits (see main.cpp).
+inline constexpr ULONG_PTR open_request = 0x4E504F44; // "DOPN"
+// A window property on the popup host naming its instance's data folder (instance_tag), so a
+// request reaches the instance that owns the same history and settings.
+inline constexpr wchar_t instance_property[] = L"DRDict.Instance";
 
 // The Ctrl+C+C lookup popup's host window: borderless, resizable from a thin edge around the
 // WebView, shown next to the mouse pointer and kept above other windows.
@@ -55,6 +61,7 @@ class Popup
     std::function<void(int width, int height)> on_resized; // DIPs, after the user resizes
     std::function<void()> on_topmost;                      // the host has been pinned above other windows
     std::function<void(std::string_view)> on_request;      // a lookup_request's payload (see above)
+    std::function<void(std::string_view)> on_open;         // an open_request's payload (see above)
 
   private:
     static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l);

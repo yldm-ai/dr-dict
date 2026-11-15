@@ -39,15 +39,21 @@ html:not(.dr-embedded) body { padding: 0; }
    white -> #191919 (--bg) and #333 -> ~#e2e2e2, near Notion's dark text (white at 90%). */
 /* The frame itself stays transparent, so a custom background colour or image shows behind the
    inverted text instead of a fixed dark grey. */
-html[data-dr-theme='dark'] {
-  background: transparent;
-  filter: invert(1) hue-rotate(180deg) contrast(0.835) brightness(1.18);
-}
-/* The inverse chain in reverse order, so media composite back to their own colours. */
-html[data-dr-theme='dark'] img,
-html[data-dr-theme='dark'] video,
-html[data-dr-theme='dark'] picture,
-html[data-dr-theme='dark'] canvas,
-html[data-dr-theme='dark'] [style*='background-image'] {
-  filter: brightness(0.847) contrast(1.198) hue-rotate(180deg) invert(1);
+/* The filters are !important inside a cascade layer: layered important declarations beat every
+   unlayered one regardless of specificity, so dictionary stylesheets cannot switch the inversion
+   off. The Longman 6th (lm6.css) carries `*:not(img) { filter: none !important }`, which removed
+   the page filter and left its light-theme #222 text and dark-blue headwords on the dark ground. */
+@layer dr-dark {
+  html[data-dr-theme='dark'] {
+    background: transparent !important;
+    filter: invert(1) hue-rotate(180deg) contrast(0.835) brightness(1.18) !important;
+  }
+  /* The inverse chain in reverse order, so media composite back to their own colours. */
+  html[data-dr-theme='dark'] img,
+  html[data-dr-theme='dark'] video,
+  html[data-dr-theme='dark'] picture,
+  html[data-dr-theme='dark'] canvas,
+  html[data-dr-theme='dark'] [style*='background-image'] {
+    filter: brightness(0.847) contrast(1.198) hue-rotate(180deg) invert(1) !important;
+  }
 }

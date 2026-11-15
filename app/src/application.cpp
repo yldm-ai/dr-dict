@@ -244,6 +244,21 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
             at = {request["x"].get<LONG>(), request["y"].get<LONG>()};
         request_lookup({request["word"].get<std::string>(), at});
     };
+    // DR Dict started again (see main.cpp): come to the front and take the files it was given.
+    popup_.on_open = [this](std::string_view payload) {
+        auto request = Json::parse(payload, nullptr, false);
+        std::vector<fs::path> files;
+        if (request.is_object() && request.contains("files") && request["files"].is_array())
+            for (const auto &file : request["files"])
+                if (file.is_string())
+                    files.emplace_back(widen(file.get<std::string>()));
+        HWND main = window_.handle();
+        ShowWindow(main, IsIconic(main) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(main);
+        if (!files.empty())
+            window_.post([this, files = std::move(files)] { import(nullptr, files); });
+    };
+    SetPropW(popup_.handle(), instance_property, reinterpret_cast<HANDLE>(instance_tag(library_.root())));
     popup_view_.on_message = [this](const Json &request) { receive(request, popup_view_); };
     popup_view_.on_resource = webview_.on_resource;
     popup_view_.on_error = [](const std::wstring &) {}; // the main window reports WebView2 problems

@@ -26,6 +26,19 @@ class Worker
     std::vector<std::jthread> threads_;
 };
 
+// One DR Dict per data folder: a hash of the folder's normalised path names the start-up mutex and
+// tags the popup host (instance_property), so a second start finds the running instance.
+inline size_t instance_tag(const fs::path &root)
+{
+    std::error_code error;
+    auto path = fs::weakly_canonical(root, error);
+    std::wstring text = (error ? fs::absolute(root) : path).lexically_normal().wstring();
+    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/'))
+        text.pop_back();
+    CharLowerBuffW(text.data(), static_cast<DWORD>(text.size()));
+    return std::hash<std::wstring>{}(text) | 1; // never 0, which GetPropW returns for "none"
+}
+
 // A word to show in the popup beside a screen point (from --lookup or another program).
 struct LookupRequest
 {
