@@ -2,6 +2,7 @@ import { $, call, escape, on, toast } from './bridge.ts';
 import {
   applyVolume,
   back,
+  currentDictionaryNames,
   currentWord,
   forward,
   initArticles,
@@ -19,6 +20,7 @@ import { addDictionaries, initLibrary, resetLibrary } from './library-panel.ts';
 import { initSettings, openSettings } from './settings-dialog.ts';
 import { Tooltips } from './tooltip.ts';
 import { initScope, scopeIds } from './scope.ts';
+import { AgentPanel } from './agent-panel.ts';
 import { activeDictionaries, effectiveTheme, onSystemThemeChange, publish, setSystemDark, state, subscribe } from './state.ts';
 
 // Self-drawn hover tips everywhere, as in DR Reader (native title tooltips never appear).
@@ -33,6 +35,8 @@ let suggestTimer = 0;
 // 'history' shows the list picked by the tabs (recent queries or favorites); 'suggest' the matches.
 let mode: 'history' | 'suggest' = 'history';
 let listKind: 'history' | 'favorites' = 'history';
+// AI 助查's right-hand panel, created once the settings are known.
+let agentPanel: AgentPanel | null = null;
 
 // Settings that change what a lookup shows (variants, translation, Wiktionary editions).
 function lookupSignature(): string {
@@ -223,6 +227,7 @@ function initSearch(): void {
   $('favorite').addEventListener('click', () => void toggleFavorite());
   setWordShownHandler((word, fromHistory) => {
     updateFavoriteButton();
+    agentPanel?.refreshContext();
     if (fromHistory) {
       input.value = word;
       scheduleSuggest();
@@ -279,6 +284,10 @@ function initKeyboard(): void {
       // Ctrl +/−/0 zoom the page like a browser (Ctrl+wheel is handled by WebView2 itself).
       event.preventDefault();
       void call('window.zoom', { step: zoomSteps[event.key] });
+    } else if (event.ctrlKey && event.key.toLowerCase() === 'j' && !dialogOpen) {
+      // AI 助查's panel; also reachable with the top bar button hidden.
+      event.preventDefault();
+      if (state.settings.agentEnabled) agentPanel?.toggle();
     } else if (event.ctrlKey && event.key.toLowerCase() === 'd' && !dialogOpen) {
       event.preventDefault();
       void toggleFavorite();
@@ -315,6 +324,8 @@ async function bootstrap(): Promise<void> {
       focusSearch(word);
       void lookup(word);
     },
+    ask: (text) => agentPanel?.askAbout(text),
+    canAsk: () => state.settings.agentEnabled,
   });
   initLibrary(on);
   initSettings({ onTabChange: (tab) => tab === 'library' && resetLibrary() });
@@ -329,6 +340,7 @@ async function bootstrap(): Promise<void> {
   document.querySelector('.brand')!.addEventListener('click', () => {
     showHome();
     updateFavoriteButton();
+    agentPanel?.refreshContext();
     focusSearch('');
   });
   subscribe('dictionaries', () => {
@@ -410,6 +422,8 @@ async function bootstrap(): Promise<void> {
     toast((error as Error).message, 'error');
   }
   applyTheme();
+  agentPanel = new AgentPanel({ context: () => ({ word: currentWord(), dictionaries: currentDictionaryNames() }) });
+  subscribe('settings', () => agentPanel?.apply());
   previous = `${effectiveTheme()}|${state.settings.invertArticles}|${state.settings.articleWidth}|${state.settings.traditionalVariant}`;
   previousChinese = lookupSignature();
   // A new search scope changes both the shown result and the suggestions.

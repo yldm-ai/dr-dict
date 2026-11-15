@@ -164,6 +164,111 @@ Json Application::niutrans_status() const
     return {{"configured", niutrans_.configured()}, {"appId", niutrans_.app_id()}};
 }
 
+bool Application::receive_agent(const Json &id, const std::string &method, const Json &params, WebView &from)
+{
+    static constexpr AgentKind kinds[] = {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode};
+    try
+    {
+        if (method == "agent.detect")
+        {
+            // Looking through PATH touches the disk and registry; keep it off the UI thread.
+            queries_.enqueue([this, &from, id] {
+                Json result = Json::object();
+                for (auto kind : kinds)
+                {
+                    auto found = AgentRunner::find(kind);
+                    result[agent_id(kind)] = found ? Json{{"path", utf8(found->path)}} : Json(nullptr);
+                }
+                reply(from, id, result);
+            });
+            return true;
+        }
+        if (method == "agent.cancel")
+        {
+            if (agents_)
+                agents_->cancel(params.at("request").get<std::string>());
+            from.send({{"id", id}, {"result", true}});
+            return true;
+        }
+        auto runner = [this]() -> AgentRunner & {
+            if (!agents_)
+                agents_ = std::make_unique<AgentRunner>([this](const AgentUpdate &update) {
+                    static constexpr const char *types[] = {"text", "status", "done", "error"};
+                    Json event{{"event", "agent"},
+                               {"request", update.request},
+                               {"type", types[static_cast<int>(update.type)]},
+                               {"text", update.text}};
+                    window_.post([this, event = std::move(event)] { webview_.send(event); });
+                });
+            return *agents_;
+        };
+        if (method == "agent.models")
+        {
+            if (!library_.settings().value("agentEnabled", false))
+                throw std::runtime_error("AI 助查没有开启，请在“设置 → AI 助查”中打开");
+            // Runs the CLI for a few seconds without a model turn: on the runner's own thread.
+            auto kind = agent_kind(params.value("agent", std::string()));
+            if (!kind)
+                throw std::runtime_error("请先选择具体的工具");
+            auto agent = AgentRunner::find(*kind);
+            if (!agent)
+                throw std::runtime_error(std::string("没有找到 ") + agent_label(*kind) + "，请确认已安装并能在终端中运行");
+            runner().list_models(*agent, [this, &from, id](std::vector<AgentModel> models, std::string error) {
+                if (!error.empty())
+                    return reply_error(from, id, error);
+                Json list = Json::array();
+                for (auto &model : models)
+                    list.push_back({{"id", model.id},
+                                    {"name", model.name},
+                                    {"description", model.description},
+                                    {"default", model.is_default},
+                                    {"efforts", model.efforts},
+                                    {"defaultEffort", model.default_effort}});
+                reply(from, id, {{"models", list}});
+            });
+            return true;
+        }
+        if (method != "agent.ask")
+            return false;
+        if (!library_.settings().value("agentEnabled", false))
+            throw std::runtime_error("AI 助查没有开启，请在“设置 → AI 助查”中打开");
+        const auto request = params.at("request").get<std::string>();
+        const auto prompt = params.at("prompt").get<std::string>();
+        const auto choice = params.value("agent", std::string("auto"));
+        const auto model = params.value("model", std::string());
+        const auto effort = params.value("effort", std::string());
+        if (request.empty() || request.size() > 64)
+            throw std::runtime_error("提问标识无效");
+        if (prompt.empty() || prompt.size() > (1u << 20))
+            throw std::runtime_error("问题为空或附带的内容过长");
+        std::optional<AgentExecutable> agent;
+        if (choice == "auto")
+        {
+            for (auto kind : kinds)
+                if ((agent = AgentRunner::find(kind)))
+                    break;
+            if (!agent)
+                throw std::runtime_error("没有找到 Codex、Claude Code 或 opencode，请先安装其中一个并登录");
+        }
+        else
+        {
+            auto kind = agent_kind(choice);
+            if (!kind)
+                throw std::runtime_error("不支持的 Agent");
+            agent = AgentRunner::find(*kind);
+            if (!agent)
+                throw std::runtime_error(std::string("没有找到 ") + agent_label(*kind) + "，请确认已安装并能在终端中运行");
+        }
+        runner().start(request, *agent, model, effort, prompt);
+        from.send({{"id", id}, {"result", {{"agent", agent_id(agent->kind)}, {"label", agent_label(agent->kind)}}}});
+    }
+    catch (const std::exception &error)
+    {
+        from.send({{"id", id}, {"error", error.what()}});
+    }
+    return true;
+}
+
 void Application::online(const Json &id, const std::string &method, const Json &params, WebView &from)
 {
     online_.enqueue([this, &from, id, method, params] {
@@ -568,6 +673,8 @@ void Application::receive(const Json &request, WebView &from)
             import(id, {}, true);
             return;
         }
+        if (method.starts_with("agent.") && receive_agent(id, method, params, from))
+            return;
         if (method == "translate" || method == "niutrans.test" || method == "wiki.lookup")
         {
             online(id, method, params, from);

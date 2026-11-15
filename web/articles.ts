@@ -57,6 +57,10 @@ export function setWordShownHandler(handler: (word: string, fromHistory: boolean
 export function currentWord(): string {
   return current?.word ?? '';
 }
+/** Names of the dictionaries that have the shown word (for AI 助查's context). */
+export function currentDictionaryNames(): string[] {
+  return current?.results.map((hit) => hit.name) ?? [];
+}
 
 function updateNavButtons(): void {
   $<HTMLButtonElement>('back').disabled = navigation.index <= 0;

@@ -68,6 +68,9 @@
           <button id="favorite" class="icon-button favorite-button" type="button" title="收藏 (Ctrl D)" aria-label="收藏" aria-pressed="false" disabled>
             <span data-icon="star"></span>
           </button>
+          <button id="ask-button" class="icon-button ask-button" type="button" title="问 AI (Ctrl J)" aria-label="问 AI" aria-pressed="false" aria-controls="ask-panel" hidden>
+            <span data-icon="sparkle"></span>
+          </button>
         </header>
         <div id="content" class="content">
           <section id="home" class="home"></section>
@@ -75,6 +78,8 @@
         </div>
         <!-- Table of contents: a rail of short lines at the right that unfolds on hover. -->
         <nav id="jump" class="toc" aria-label="跳转到词典" hidden></nav>
+        <!-- AI 助查 (agent-panel.ts): over the content at the right, or docked when pinned. -->
+        <aside id="ask-panel" class="ask-panel" aria-label="问 AI" hidden></aside>
       </main>
     </div>
 
@@ -88,6 +93,7 @@
         <button class="tab" type="button" role="tab" data-tab="interface" aria-selected="false"><span data-icon="layout"></span>界面</button>
         <button class="tab" type="button" role="tab" data-tab="article" aria-selected="false"><span data-icon="book"></span>词条</button>
         <button class="tab" type="button" role="tab" data-tab="online" aria-selected="false"><span data-icon="globe"></span>在线</button>
+        <button class="tab" type="button" role="tab" data-tab="agent" aria-selected="false"><span data-icon="sparkle"></span>AI 助查</button>
         <button class="tab" type="button" role="tab" data-tab="data" aria-selected="false"><span data-icon="clock"></span>数据</button>
       </div>
       <div class="tab-body">
@@ -246,6 +252,57 @@
               <label class="choice"><input type="checkbox" data-wiki="en" /><span>English Wiktionary（en.wiktionary.org）</span></label>
               <label class="choice"><input type="checkbox" data-wiki="zh" /><span>中文维基词典（zh.wiktionary.org）</span></label>
               <p class="group-note plain">查单词时，维基词典的释义显示在本地词典之后，只保留英语、汉语等相关语言的部分。查询的词会发送到 wiktionary.org；内容按 CC BY-SA 4.0 协议授权。</p>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="tab-panel" role="tabpanel" data-panel="agent" hidden>
+          <div class="groups">
+            <fieldset class="group wide">
+              <legend>AI 助查</legend>
+              <label class="choice"><input id="agent-enabled" type="checkbox" /><span>启用 AI 助查，用本机的命令行 Agent 回答关于词语和句子的问题</span></label>
+              <p class="group-note">打开后，右上角收藏按钮旁会出现 AI 按钮，按 <kbd>Ctrl J</kbd> 或在词条中选中文字后右键“问 AI”也能打开右侧的问答面板。</p>
+              <label class="choice"><input id="agent-button" type="checkbox" /><span>在顶栏显示 AI 按钮</span></label>
+              <p class="group-note">隐藏后仍可用 <kbd>Ctrl J</kbd> 和右键菜单打开。面板默认在点击别处时自动隐藏，可用面板上的图钉固定在右侧。</p>
+            </fieldset>
+            <fieldset class="group wide" id="agent-options">
+              <legend>回答问题的工具</legend>
+              <div class="agent-row">
+                <span class="agent-row-label">工具<small>复用本机已安装并登录的命令行 Agent</small></span>
+                <div class="agent-control">
+                  <button id="agent-detect" class="icon-button small" type="button" title="重新检测本机工具" aria-label="重新检测本机工具"><span data-icon="refresh"></span></button>
+                  <select id="agent-choice" class="select-input" aria-label="回答问题的工具">
+                    <option value="auto">自动选择</option>
+                    <option value="codex">Codex</option>
+                    <option value="claude">Claude Code</option>
+                    <option value="opencode">opencode</option>
+                  </select>
+                </div>
+              </div>
+              <div class="agent-row">
+                <span class="agent-row-label">模型<small id="agent-model-status"></small></span>
+                <div class="agent-control">
+                  <button id="agent-model-refresh" class="icon-button small" type="button" title="重新查询可用模型" aria-label="重新查询可用模型"><span data-icon="refresh"></span></button>
+                  <select id="agent-model" class="select-input" aria-label="模型"></select>
+                </div>
+              </div>
+              <div id="agent-model-custom-row" class="agent-row" hidden>
+                <span class="agent-row-label">其他模型<small>填写该工具能识别的模型名称，按 Enter 保存</small></span>
+                <input id="agent-model-custom" class="text-input agent-custom" maxlength="128" spellcheck="false" autocomplete="off" aria-label="其他模型" />
+              </div>
+              <div class="agent-row">
+                <span class="agent-row-label">思考强度<small id="agent-effort-status"></small></span>
+                <div class="agent-control"><select id="agent-effort" class="select-input" aria-label="思考强度"></select></div>
+              </div>
+              <div id="agent-effort-custom-row" class="agent-row" hidden>
+                <span class="agent-row-label">其他强度<small>填写该工具能识别的强度名称，按 Enter 保存</small></span>
+                <input id="agent-effort-custom" class="text-input agent-custom" maxlength="32" spellcheck="false" autocomplete="off" aria-label="其他强度" />
+              </div>
+              <div class="agent-detect">
+                <span class="agent-row-label">本机检测<small>自动选择时，按 Codex、Claude Code、opencode 的顺序使用第一个找到的工具</small></span>
+                <ul id="agent-status" class="agent-status"></ul>
+              </div>
+              <p class="group-note plain">提问时，正在查的词或句子、选中的文字和本次对话会发送给该工具所连接的模型服务。工具在临时目录中以只读、不调用工具的方式运行，不会写入你的项目或会话列表。</p>
             </fieldset>
           </div>
         </section>

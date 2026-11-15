@@ -1,0 +1,84 @@
+/* SelectControl styling from DR Reader, using DR Dict's theme tokens. */
+.select-control { position: relative; width: 100%; min-width: 0; }
+.select-source { display: none; }
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 36px;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  box-shadow: 0 1px 1px #00000008;
+  font-size: 14px;
+  text-align: left;
+  transition: border-color 120ms var(--ease), background 120ms var(--ease), box-shadow 120ms var(--ease);
+}
+.select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Hover and an open menu both deepen the fill as well as the edge. The :not(:disabled) also lifts
+   specificity above the per-context backgrounds (toolbar, settings) so this always wins. */
+.select-trigger:not(:disabled):is(:hover, [aria-expanded="true"]) { border-color: var(--control-border); background: var(--hover); }
+.select-trigger[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 7%, transparent); }
+.select-trigger:focus-visible { outline: none; border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 7%, transparent); }
+.select-trigger > .icon { width: 20px; height: 20px; color: var(--muted); transition: transform 160ms var(--ease); }
+.select-trigger[aria-expanded="true"] > .icon { transform: rotate(180deg); }
+.select-trigger:disabled { opacity: .45; cursor: default; }
+.select-popup {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--control);
+  color: var(--text);
+  box-shadow: var(--shadow-flyout);
+  overflow: hidden;
+}
+.select-popup:popover-open { display: flex; flex-direction: column; animation: flyout-enter 120ms var(--ease); }
+.select-options { min-height: 0; overflow: auto; }
+.select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.select-option.active { background: var(--hover); }
+.select-option[aria-selected="true"] { color: var(--accent); font-weight: 500; }
+.select-option > .icon { width: 18px; height: 18px; }
+.select-search { display: flex; align-items: center; gap: 8px; margin: 2px 2px 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); flex-shrink: 0; }
+.select-search:focus-within { border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 7%, transparent); }
+.select-search > .icon { width: 18px; height: 18px; color: var(--muted); }
+.select-search input[type="search"] { width: 100%; min-width: 0; min-height: 34px; height: 34px; padding: 0; background: transparent; border: 0; border-radius: 0; outline: none; color: var(--text); font-size: 14px; }
+.select-hint { font-size: 12px; color: var(--muted); margin: 8px 9px; }
+.overlay-scroll { scrollbar-width: none; overscroll-behavior: contain; }
+.overlay-scroll::-webkit-scrollbar { display: none; }
+.overlay-scrollbar {
+  position: absolute;
+  z-index: 30;
+  width: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+.overlay-scrollbar.visible, .overlay-scrollbar.dragging { opacity: 1; pointer-events: auto; }
+.overlay-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 4px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--text) 24%, transparent);
+  transition: width 120ms var(--ease), background-color 120ms var(--ease);
+}
+.overlay-scrollbar:hover .overlay-scrollbar-thumb,
+.overlay-scrollbar.dragging .overlay-scrollbar-thumb { width: 6px; background: color-mix(in srgb, var(--text) 40%, transparent); }

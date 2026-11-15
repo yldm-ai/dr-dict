@@ -12,7 +12,13 @@ menu.hidden = true;
 document.body.append(menu);
 
 let selected = '';
-let handlers: { lookup: (word: string) => void } = { lookup: () => {} };
+type Handlers = {
+  lookup: (word: string) => void;
+  /** 问 AI with the selection attached; offered while `canAsk()` (AI 助查 on). */
+  ask?: (text: string) => void;
+  canAsk?: () => boolean;
+};
+let handlers: Handlers = { lookup: () => {} };
 let copyInFrame: (() => void) | null = null;
 
 const hasHan = (text: string) => /[㐀-鿿豈-﫿]/.test(text);
@@ -42,6 +48,13 @@ export function showContextMenu(x: number, y: number, text: string, copy?: () =>
            </button>`
         : ''
     }
+    ${
+      handlers.ask && handlers.canAsk?.()
+        ? `<button class="context-item" type="button" role="menuitem" data-command="ask">
+             <span data-icon="sparkle"></span><span class="context-label">问 AI</span><kbd class="context-key">Ctrl J</kbd>
+           </button>`
+        : ''
+    }
     <button class="context-item" type="button" role="menuitem" data-command="copy">
       <span data-icon="copy"></span><span class="context-label">复制</span><kbd class="context-key">Ctrl C</kbd>
     </button>
@@ -64,6 +77,7 @@ async function run(command: string): Promise<void> {
   const copy = copyInFrame;
   hideContextMenu();
   if (command === 'lookup') handlers.lookup(oneLine(text));
+  else if (command === 'ask') handlers.ask?.(text);
   else if (command === 'copy') {
     try {
       await navigator.clipboard.writeText(text);
@@ -76,7 +90,7 @@ async function run(command: string): Promise<void> {
   }
 }
 
-export function initContextMenu(options: { lookup: (word: string) => void }): void {
+export function initContextMenu(options: Handlers): void {
   handlers = options;
   menu.addEventListener('click', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>('[data-command]');

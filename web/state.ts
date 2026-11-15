@@ -52,6 +52,26 @@ export type Settings = {
   translateSentences: boolean;
   // Wiktionary editions shown after the dictionaries ("en", "zh").
   wiktionary: string[];
+  // AI 助查 through a local agent CLI: off by default. The top bar button can be hidden; the
+  // right-hand panel hides itself on a click elsewhere unless pinned.
+  agentEnabled: boolean;
+  agentButton: boolean;
+  agentPinned: boolean;
+  agent: AgentChoice;
+  agentModels: Partial<Record<AgentId, string>>;
+  agentEfforts: Partial<Record<AgentId, string>>;
+};
+/** Local agent CLIs that can answer questions (engine/include/dr/agent.h). */
+export type AgentId = 'codex' | 'claude' | 'opencode';
+export type AgentChoice = 'auto' | AgentId;
+/** A model an agent CLI reports (`agent.models`); `id` is what its `--model` takes. */
+export type AgentModelInfo = {
+  id: string;
+  name: string;
+  description: string;
+  default: boolean;
+  efforts: string[];
+  defaultEffort: string;
 };
 /** 小牛翻译 credentials as the native side reports them; the key itself never reaches the page. */
 export type NiutransStatus = { configured: boolean; appId: string };
@@ -77,6 +97,12 @@ export const state = {
     volume: 0.22,
     translateSentences: true,
     wiktionary: ['en'],
+    agentEnabled: false,
+    agentButton: true,
+    agentPinned: false,
+    agent: 'auto',
+    agentModels: {},
+    agentEfforts: {},
   } as Settings,
   niutrans: { configured: false, appId: '' } as NiutransStatus,
   history: [] as HistoryItem[],

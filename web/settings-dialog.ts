@@ -3,9 +3,10 @@ import { hydrateIcons } from './icons.ts';
 import { publish, state, type Settings, type Theme } from './state.ts';
 import { backgroundUrl, isHex, themes } from './appearance.ts';
 import { ColorPicker } from './color-picker.ts';
+import { agentTabShown, initAgentSettings, renderAgentSettings } from './agent-settings.ts';
 import { speak } from './speech.ts';
 
-export type Tab = 'library' | 'interface' | 'article' | 'online' | 'data';
+export type Tab = 'library' | 'interface' | 'article' | 'online' | 'agent' | 'data';
 const dialog = $<HTMLDialogElement>('settings-dialog');
 const tabs = [...dialog.querySelectorAll<HTMLButtonElement>('.tab')];
 let onTabChange: (tab: Tab) => void = () => {};
@@ -24,6 +25,7 @@ function select(tab: Tab): void {
     button.tabIndex = selected ? 0 : -1;
   }
   for (const panel of dialog.querySelectorAll<HTMLElement>('.tab-panel')) panel.hidden = panel.dataset.panel !== tab;
+  if (tab === 'agent') agentTabShown();
   onTabChange(tab);
 }
 
@@ -49,6 +51,7 @@ function render(): void {
   $('data-path').textContent = state.dataPath;
   renderAppearance();
   renderOnline();
+  renderAgentSettings();
 }
 
 function renderOnline(): void {
@@ -240,6 +243,7 @@ export function initSettings(handlers: { onTabChange: (tab: Tab) => void }): voi
   hydrateIcons(dialog);
   initAppearance();
   initOnline();
+  initAgentSettings(save);
   dialog.addEventListener('close', () => void call('window.dim', { dimmed: false }).catch(() => {}));
   dialog.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;

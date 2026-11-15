@@ -1,6 +1,7 @@
 #pragma once
 #include "dr/library.h"
 #include "dr/window.h"
+#include "agent_runner.h"
 #include "copy_hotkey.h"
 #include "http.h"
 #include "popup.h"
@@ -80,6 +81,9 @@ class Application
     // Online requests (translation, Wiktionary pages and their frames) run on online_, so a slow
     // network never holds up dictionary lookups on queries_.
     void online(const Json &id, const std::string &method, const Json &params, WebView &from);
+    // AI 助查 through local agent CLIs (agent.*), as in DR Reader. Answers stream to the main
+    // window as `agent` events keyed by the page's request id.
+    bool receive_agent(const Json &id, const std::string &method, const Json &params, WebView &from);
     Window window_;
     WebView webview_;
     Popup popup_;
@@ -98,5 +102,8 @@ class Application
     Worker queries_{2};
     Worker imports_{1};
     Worker online_{3};
+    // Created on first use; destroyed first, which stops running CLIs and waits for their threads
+    // while the window they post to still exists.
+    std::unique_ptr<AgentRunner> agents_;
 };
 } // namespace dr

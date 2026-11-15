@@ -1,3 +1,4 @@
+#include "dr/agent.h"
 #include "dr/compress.h"
 #include "dr/library.h"
 #include "dr/mdict.h"
@@ -126,6 +127,247 @@ std::string hex(const std::array<uint8_t, 16> &d)
     }
     return s;
 }
+void require(bool ok, const char *message)
+{
+    if (!ok)
+    {
+        ++failures;
+        std::cerr << "require failed: " << message << "\n";
+    }
+}
+template <class F> void rejects(F fn, const char *message)
+{
+    bool failed = false;
+    try
+    {
+        fn();
+    }
+    catch (const std::exception &)
+    {
+        failed = true;
+    }
+    require(failed, message);
+}
+// From DR Reader's tests/engine_tests.cpp, which this agent module comes from.
+// Event lines are trimmed copies of real output from codex-cli 0.167, Claude Code 2.1 and opencode 1.19.
+void agent_checks()
+{
+    using dr::AgentEvent;
+    using dr::AgentKind;
+    auto texts = [](const std::vector<AgentEvent> &events) {
+        std::string text;
+        for (auto &event : events)
+            if (event.type == AgentEvent::Type::Text) text += event.text;
+        return text;
+    };
+    {
+        dr::AgentStream claude(AgentKind::Claude);
+        require(claude.line(R"({"type":"system","subtype":"init","tools":[],"mcp_servers":[]})").empty(), "claude init is silent");
+        std::string answer;
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"书中"}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"x"}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"写道"}},"parent_tool_use_id":"tool_1"})"));
+        answer += texts(claude.line(R"({"type":"assistant","message":{"content":[{"type":"text","text":"书中"}]}})"));
+        auto retry = claude.line(R"({"type":"system","subtype":"api_retry","attempt":2,"max_retries":10})");
+        require(retry.size() == 1 && retry[0].type == AgentEvent::Type::Status, "claude retry is progress");
+        require(claude.line("not json at all").empty() && !claude.succeeded(), "claude ignores noise");
+        claude.line(R"({"type":"result","subtype":"success","is_error":false,"result":"书中"})");
+        require(answer == "书中" && claude.succeeded(), "claude streams text deltas only once");
+        dr::AgentStream failing(AgentKind::Claude);
+        auto failed = failing.line(R"({"type":"result","subtype":"success","is_error":true,"result":"API Error: 503"})");
+        require(failing.failed() && failed.at(0).type == AgentEvent::Type::Error && failing.last_error() == "API Error: 503", "claude errors fail");
+    }
+    // Codex app-server and opencode ACP are conversations: each reply is one JSON-RPC line per request.
+    auto requests = [](const std::string &reply) {
+        std::vector<dr::Json> lines;
+        for (size_t start = 0, end; (end = reply.find('\n', start)) != reply.npos; start = end + 1)
+            lines.push_back(dr::Json::parse(reply.substr(start, end - start)));
+        return lines;
+    };
+    {
+        dr::AgentStream codex(AgentKind::Codex);
+        require(codex.interactive(), "codex runs as a server");
+        auto opening = requests(codex.start("问题", "gpt-6.1", "high", "C:/tmp/work"));
+        require(opening.size() == 1 && opening[0]["method"] == "initialize" && opening[0]["id"] == 1, "codex initializes first");
+        codex.line(R"({"id":1,"result":{"userAgent":"codex"}})");
+        auto thread = requests(codex.take_reply());
+        require(thread.size() == 2 && thread[0]["method"] == "initialized" && thread[1]["method"] == "thread/start" &&
+                    thread[1]["params"]["model"] == "gpt-6.1" && thread[1]["params"]["sandbox"] == "read-only" &&
+                    thread[1]["params"]["approvalPolicy"] == "never" && thread[1]["params"]["ephemeral"] == true,
+                "codex starts a read-only, ephemeral thread with the chosen model");
+        codex.line(R"({"id":2,"result":{"thread":{"id":"thr_1"},"model":"gpt-6.1"}})");
+        auto turn = requests(codex.take_reply());
+        require(turn.size() == 1 && turn[0]["method"] == "turn/start" && turn[0]["params"]["threadId"] == "thr_1" &&
+                    turn[0]["params"]["effort"] == "high" && turn[0]["params"]["input"][0]["text"] == "问题",
+                "codex asks the question with the effort");
+        codex.line(R"({"id":3,"result":{"turn":{"id":"turn_1","items":[],"status":"inProgress"}}})");
+        auto approval = requests((codex.line(R"({"id":0,"method":"item/commandExecution/requestApproval","params":{}})"), codex.take_reply()));
+        require(approval.size() == 1 && approval[0]["id"] == 0 && approval[0].contains("error"), "codex server requests are refused");
+        auto retry = codex.line(R"({"method":"error","params":{"error":{"message":"Reconnecting… 1/5"},"threadId":"thr_1","turnId":"turn_1","willRetry":true}})");
+        require(retry.size() == 1 && retry[0].type == AgentEvent::Type::Status, "codex retries are progress");
+        std::string answer;
+        answer += texts(codex.line(R"({"method":"item/agentMessage/delta","params":{"delta":"第一","itemId":"msg_1","threadId":"thr_1","turnId":"turn_1"}})"));
+        answer += texts(codex.line(R"({"method":"item/agentMessage/delta","params":{"delta":"段","itemId":"msg_1","threadId":"thr_1","turnId":"turn_1"}})"));
+        answer += texts(codex.line(R"({"method":"item/completed","params":{"item":{"id":"msg_1","type":"agentMessage","text":"第一段"}}})"));
+        answer += texts(codex.line(R"({"method":"item/agentMessage/delta","params":{"delta":"第二段","itemId":"msg_2","threadId":"thr_1","turnId":"turn_1"}})"));
+        require(answer == "第一段\n\n第二段" && !codex.finished(), "codex streams deltas; messages become paragraphs");
+        codex.line(R"({"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","items":[],"status":"completed"}}})");
+        require(codex.succeeded() && codex.finished(), "codex turn completion succeeds");
+        dr::AgentStream failing(AgentKind::Codex);
+        failing.start("问题");
+        failing.line(R"({"id":1,"result":{}})");
+        require(!requests(failing.take_reply())[1]["params"].contains("model"), "codex keeps its default model");
+        failing.line(R"({"id":2,"result":{"thread":{"id":"thr_2"}}})");
+        require(!requests(failing.take_reply())[0]["params"].contains("effort"), "codex keeps its default effort");
+        failing.line(R"({"method":"error","params":{"error":{"message":"The 'x' model is not supported"},"threadId":"thr_2","turnId":"t","willRetry":false}})");
+        failing.line(R"({"method":"turn/completed","params":{"threadId":"thr_2","turn":{"id":"t","items":[],"status":"failed","error":null}}})");
+        require(failing.failed() && failing.last_error() == "The 'x' model is not supported", "codex turn failure");
+        dr::AgentStream rejected(AgentKind::Codex);
+        rejected.start("问题", "gpt-6.1");
+        rejected.line(R"({"id":1,"error":{"code":-32600,"message":"Not initialized"}})");
+        require(rejected.failed() && rejected.last_error() == "Not initialized", "codex request errors fail");
+    }
+    {
+        dr::AgentStream opencode(AgentKind::OpenCode);
+        auto opening = requests(opencode.start("问题", "magpie/deepseek/deepseek-flash", "high", "C:/tmp/work"));
+        require(opening.size() == 1 && opening[0]["method"] == "initialize" && opening[0]["params"]["protocolVersion"] == 1 &&
+                    opening[0]["params"]["clientCapabilities"]["terminal"] == false,
+                "opencode initializes ACP without client capabilities");
+        opencode.line(R"({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}})");
+        auto session = requests(opencode.take_reply());
+        require(session.size() == 1 && session[0]["method"] == "session/new" && session[0]["params"]["cwd"] == "C:/tmp/work" &&
+                    session[0]["params"]["mcpServers"].empty(),
+                "opencode opens a session in the working directory");
+        opencode.line(R"({"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_1","configOptions":[]}})");
+        auto model = requests(opencode.take_reply());
+        require(model.size() == 1 && model[0]["method"] == "session/set_config_option" && model[0]["params"]["configId"] == "model" &&
+                    model[0]["params"]["value"] == "magpie/deepseek/deepseek-flash" && model[0]["params"]["sessionId"] == "ses_1",
+                "opencode selects the model");
+        opencode.line(R"({"jsonrpc":"2.0","id":3,"result":{"configOptions":[]}})");
+        auto effort = requests(opencode.take_reply());
+        require(effort.size() == 1 && effort[0]["params"]["configId"] == "effort" && effort[0]["params"]["value"] == "high", "opencode selects the effort");
+        opencode.line(R"({"jsonrpc":"2.0","id":4,"result":{"configOptions":[]}})");
+        auto prompt = requests(opencode.take_reply());
+        require(prompt.size() == 1 && prompt[0]["method"] == "session/prompt" && prompt[0]["params"]["prompt"][0]["text"] == "问题",
+                "opencode asks the question");
+        auto permission = requests((opencode.line(R"({"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{"sessionId":"ses_1"}})"), opencode.take_reply()));
+        require(permission.size() == 1 && permission[0]["result"]["outcome"]["outcome"] == "cancelled", "opencode permissions are declined");
+        std::string answer;
+        answer += texts(opencode.line(R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_thought_chunk","messageId":"prt_0","content":{"type":"text","text":"想"}}}})"));
+        answer += texts(opencode.line(R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"text","text":"甲"}}}})"));
+        answer += texts(opencode.line(R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"text","text":"乙"}}}})"));
+        answer += texts(opencode.line(R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_2","content":{"type":"text","text":"丙"}}}})"));
+        require(answer == "甲乙\n\n丙" && !opencode.finished(), "opencode streams chunks, skips thoughts, and separates messages");
+        opencode.line(R"({"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}})");
+        require(opencode.succeeded() && opencode.finished(), "opencode end of turn succeeds");
+        dr::AgentStream plain(AgentKind::OpenCode);
+        plain.start("问题", "", "", "C:/tmp/work");
+        plain.line(R"({"jsonrpc":"2.0","id":1,"result":{}})");
+        plain.take_reply();
+        plain.line(R"({"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_2"}})");
+        require(requests(plain.take_reply())[0]["method"] == "session/prompt", "opencode keeps its defaults without options");
+        dr::AgentStream failing(AgentKind::OpenCode);
+        failing.start("问题", "x/y", "", "C:/tmp/work");
+        failing.line(R"({"jsonrpc":"2.0","id":1,"result":{}})");
+        failing.line(R"({"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_3"}})");
+        failing.line(R"({"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error","data":{"message":"Model not found: x/y"}}})");
+        require(failing.failed() && failing.last_error() == "Internal error：Model not found: x/y", "opencode errors explain themselves");
+        dr::AgentStream refused(AgentKind::OpenCode);
+        refused.start("问题", "", "", "C:/tmp/work");
+        refused.line(R"({"jsonrpc":"2.0","id":5,"result":{"stopReason":"refusal"}})");
+        require(refused.failed(), "opencode refusals fail");
+    }
+    // Arguments: tool-free, read-only, prompt on stdin, no cmd.exe metacharacters.
+    auto codex_args = dr::agent_arguments(AgentKind::Codex, "gpt-6.1", "high", std::vector<std::string>{"node_repl", "bad name"});
+    require(codex_args.front() == "app-server" && std::count(codex_args.begin(), codex_args.end(), "mcp_servers.node_repl.enabled=false") == 1 &&
+                std::none_of(codex_args.begin(), codex_args.end(), [](auto &arg) { return arg.find("bad name") != arg.npos; }),
+            "codex runs app-server and disables valid MCP names");
+    auto effortful = dr::agent_arguments(AgentKind::Claude, "opus", "max");
+    auto flag = std::find(effortful.begin(), effortful.end(), "--effort");
+    require(flag != effortful.end() && flag + 1 != effortful.end() && flag[1] == "max", "claude effort flag");
+    require(dr::agent_arguments(AgentKind::OpenCode, "opencode/beam-free", "xhigh") == std::vector<std::string>{"acp"}, "opencode runs ACP");
+    for (auto kind : {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode})
+    {
+        auto plain = dr::agent_arguments(kind, "");
+        require(std::none_of(plain.begin(), plain.end(), [](auto &arg) { return arg == "--effort" || arg == "--variant" || arg.starts_with("model_reasoning_effort"); }),
+                "no effort keeps the CLI default");
+    }
+    rejects([] { dr::agent_arguments(AgentKind::Claude, "", "high&calc"); }, "efforts cannot inject commands");
+    rejects([] { dr::agent_arguments(AgentKind::Codex, "", "a=b"); }, "efforts cannot set other Codex options");
+    auto claude_args = dr::agent_arguments(AgentKind::Claude, "");
+    require(std::find(claude_args.begin(), claude_args.end(), "--no-session-persistence") != claude_args.end() &&
+                std::find(claude_args.begin(), claude_args.end(), "--model") == claude_args.end(),
+            "claude does not persist sessions and keeps its default model");
+    for (auto kind : {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode})
+        for (auto &arg : dr::agent_arguments(kind, "anthropic/claude-sonnet-5", "high"))
+            require(arg.find_first_of("&|<>^%!\"") == arg.npos, "agent arguments are cmd-safe");
+    rejects([] { dr::agent_arguments(AgentKind::OpenCode, "x & calc"); }, "model names cannot inject commands");
+    auto names = dr::codex_mcp_server_names("model = \"x\"\n[mcp_servers.node_repl]\n[mcp_servers.node_repl.env]\n  [mcp_servers.\"quoted-one\"]\n[mcp_servers.bad$name]\n[plugins.\"a@b\"]\n");
+    require(names == std::vector<std::string>{"node_repl", "quoted-one"}, "codex MCP server names");
+    // (DR Reader's own settings checks are replaced by the DR Dict ones in main.)
+
+    // Model discovery: no model turn, only the CLIs' own listing protocols.
+    {
+        dr::AgentModelProbe codex(AgentKind::Codex);
+        auto args = codex.arguments({"node_repl"});
+        require(args.at(0) == "app-server" && std::count(args.begin(), args.end(), "mcp_servers.node_repl.enabled=false") == 1 &&
+                    codex.interactive() && codex.start().find(R"("method":"initialize")") != std::string::npos,
+                "codex lists models through app-server");
+        require(codex.line(R"({"method":"remoteControl/status/changed","params":{"status":"disabled"}})").empty(), "codex notifications need no reply");
+        auto refusal = codex.line(R"({"id":7,"method":"item/tool/requestUserInput","params":{}})");
+        require(refusal.find(R"("id":7)") != std::string::npos && refusal.find("-32601") != std::string::npos, "codex server requests are refused");
+        auto next = codex.line(R"({"id":1,"result":{"userAgent":"dr-reader/0.167.0","codexHome":"C:\\Users\\x\\.codex"}})");
+        require(next.find(R"("method":"initialized")") != std::string::npos && next.find(R"("method":"model/list")") != std::string::npos,
+                "codex asks for models once initialized");
+        auto page = codex.line(R"({"id":2,"result":{"data":[{"id":"gpt-6.1-sol","model":"gpt-6.1-sol","displayName":"GPT-6.1-Sol","description":"Latest workhorse model.","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"high","description":"Deep"},{"reasoningEffort":"bad effort"}],"defaultReasoningEffort":"low","isDefault":true},{"id":"x","model":"internal-x","displayName":"X","hidden":true,"isDefault":false}],"nextCursor":"c2"}})");
+        require(page.find(R"("cursor":"c2")") != std::string::npos && page.find(R"("id":3)") != std::string::npos && !codex.finished(),
+                "codex follows the next page");
+        codex.line(R"({"id":3,"result":{"data":[{"model":"gpt-6-astra","displayName":"GPT-6-Astra","isDefault":false},{"model":"gpt-6.1-sol","displayName":"dup"}],"nextCursor":null}})");
+        auto models = codex.models();
+        require(codex.finished() && !codex.failed() && models.size() == 2 && models[0].id == "gpt-6.1-sol" && models[0].is_default &&
+                    models[0].name == "GPT-6.1-Sol" && models[1].id == "gpt-6-astra" &&
+                    models[0].efforts == std::vector<std::string>{"low", "high"} && models[0].default_effort == "low" && models[1].efforts.empty(),
+                "codex models: hidden and duplicate entries dropped");
+        dr::AgentModelProbe rejected(AgentKind::Codex);
+        rejected.line(R"({"id":1,"error":{"code":-32600,"message":"Not logged in"}})");
+        require(rejected.failed() && rejected.error() == "Not logged in", "codex discovery error");
+    }
+    {
+        dr::AgentModelProbe claude(AgentKind::Claude);
+        auto args = claude.arguments();
+        require(std::find(args.begin(), args.end(), "stream-json") != args.end() && std::find(args.begin(), args.end(), "--no-session-persistence") != args.end() &&
+                    claude.start().find(R"("subtype":"initialize")") != std::string::npos,
+                "claude lists models through the initialize control request");
+        claude.line(R"({"type":"system","subtype":"init"})");
+        require(!claude.finished(), "claude waits for its control response");
+        claude.line(R"j({"type":"control_response","response":{"subtype":"success","request_id":"models","response":{"commands":[],"models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)"},{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5","description":"Custom Opus model","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5"},{"value":"opus[1m]","resolvedModel":"claude-opus-5-5[1m]","displayName":"Opus (1M context)"},{"value":"bad model","displayName":"Bad"}]}}})j");
+        auto models = claude.models();
+        require(claude.finished() && models.size() == 3 && models[0].id == "opus" && models[0].is_default && !models[1].is_default &&
+                    models[2].id == "opus[1m]" && models[0].efforts.size() == 5 && models[0].efforts.back() == "max" && models[1].efforts.empty(),
+                "claude models: aliases kept, default marked, unsafe ids dropped");
+        dr::AgentModelProbe rejected(AgentKind::Claude);
+        rejected.line(R"({"type":"control_response","response":{"subtype":"error","request_id":"models","error":"Invalid API key"}})");
+        require(rejected.failed() && rejected.error() == "Invalid API key", "claude discovery error");
+    }
+    {
+        dr::AgentModelProbe opencode(AgentKind::OpenCode);
+        require(opencode.arguments() == std::vector<std::string>{"models", "--verbose"} && !opencode.interactive() && opencode.start().empty(),
+                "opencode lists models with `opencode models --verbose`");
+        // Verbose output: the id line, then the model object; variants are its reasoning efforts.
+        for (auto line : {"opencode/beam-free\r", "{", "  \"name\": \"Beam Free\",", "  \"limit\": {", "    \"context\": 1048576", "  },",
+                          "  \"variants\": {", "    \"low\": { \"reasoningEffort\": \"low\" },", "    \"xhigh\": {}, \"max\": {}", "  }", "}\r",
+                          "magpie/auto/gpt-5.6-luna", "{", "  \"name\": \"GPT-5.6 Luna\",", "  \"variants\": {}", "}",
+                          "", "Warning: something", "opencode/beam-free", "plain/model-without-details"})
+            opencode.line(line);
+        opencode.end();
+        auto models = opencode.models();
+        require(models.size() == 3 && models[0].id == "opencode/beam-free" && models[0].name == "Beam Free" &&
+                    models[0].efforts == std::vector<std::string>{"low", "xhigh", "max"} && models[1].name == "GPT-5.6 Luna" &&
+                    models[1].efforts.empty() && models[2].name == "plain/model-without-details",
+                "opencode models: names and variants in the CLI's order");
+    }
+}
 } // namespace
 
 int main()
@@ -151,6 +393,8 @@ int main()
     CHECK(std::find(forms.begin(), forms.end(), "study") != forms.end());
     forms = english_base_forms("running");
     CHECK(std::find(forms.begin(), forms.end(), "run") != forms.end());
+
+    agent_checks();
 
     // Online sources, with a fake network.
     CHECK(md5_hex("") == "d41d8cd98f00b204e9800998ecf8427e");
@@ -588,6 +832,25 @@ int main()
         CHECK(zh.save_settings({{"wiktionary", {"zh", "xx", "en", "zh"}}})["wiktionary"] == Json::array({"en", "zh"}));
         CHECK(zh.save_settings({{"wiktionary", Json::array()}, {"translateSentences", false}})["wiktionary"].empty());
         CHECK(zh.settings()["translateSentences"] == false);
+        // AI 助查 is off until turned on; tool, model and effort names are checked like DR Reader's.
+        CHECK(zh.settings()["agentEnabled"] == false && zh.settings()["agentButton"] == true &&
+              zh.settings()["agentPinned"] == false && zh.settings()["agent"] == "auto");
+        auto agent = zh.save_settings({{"agentEnabled", true},
+                                       {"agent", "claude"},
+                                       {"agentModels", {{"claude", "opus[1m]"}, {"codex", "a;b"}}},
+                                       {"agentEfforts", {{"claude", "max"}, {"opencode", "high max"}}}});
+        CHECK(agent["agentEnabled"] == true && agent["agent"] == "claude");
+        CHECK(agent["agentModels"]["claude"] == "opus[1m]" && agent["agentModels"]["codex"] == "");
+        CHECK(agent["agentEfforts"]["claude"] == "max" && agent["agentEfforts"]["opencode"] == "");
+        CHECK(zh.save_settings({{"agent", "gemini"}})["agent"] == "claude");
+        // Hiding the button is independent of enabling the feature; pin and visibility persist.
+        zh.save_settings({{"agentButton", false}, {"agentPinned", true}});
+        CHECK(zh.settings()["agentEnabled"] == true && zh.settings()["agentButton"] == false &&
+              zh.settings()["agentPinned"] == true);
+        CHECK(zh.save_settings({{"agentButton", "true"}, {"agentPinned", 0}})["agentButton"] == false);
+        zh.save_settings({{"agentEnabled", false}});
+        CHECK(zh.settings()["agentEnabled"] == false && zh.settings()["agentButton"] == false &&
+              zh.settings()["agentPinned"] == true);
         zh.save_settings({{"chineseVariant", "t"}});
         CHECK(zh.lookup("里面")["results"].size() == 1);
         zh.save_settings({{"chineseVariant", "all"}});

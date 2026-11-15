@@ -25,6 +25,10 @@ const paths: Record<string, string> = {
   alert: '<path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4.5M12 17.25v.01"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   sound: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  // A four-point spark for AI 助查.
+  sparkle: '<path d="M12 3.5c.6 4.3 3.2 6.9 7.5 7.5-4.3.6-6.9 3.2-7.5 7.5-.6-4.3-3.2-6.9-7.5-7.5 4.3-.6 6.9-3.2 7.5-7.5z"/><path d="M18.5 15.5v4M16.5 17.5h4"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
+  'pin-off': '<path d="M9.5 4.5h5l-.8 5.2 3.3 3.3H7l3.3-3.3z"/><path d="M12 13v6.5M4.5 4.5l15 15"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5s1.1-6.1 3.4-8.5z"/>',
 };
 

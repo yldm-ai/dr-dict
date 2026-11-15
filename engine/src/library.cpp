@@ -1,4 +1,5 @@
 #include "dr/library.h"
+#include "dr/agent.h"
 #include "dr/online.h"
 #include "dr/text.h"
 #include <algorithm>
@@ -273,6 +274,16 @@ Json Library::default_settings()
             {"translateSentences", true},
             // Wiktionary editions (dr/online.h wiki_sites) shown after the dictionaries.
             {"wiktionary", Json::array({"en"})},
+            // AI 助查 through a local agent CLI (dr/agent.h). Off until the user turns it on: a
+            // question sends the looked-up word, selected text and the conversation to the model
+            // service the CLI uses. The top bar button can be hidden; the right-hand panel hides
+            // itself when the pointer is elsewhere unless pinned.
+            {"agentEnabled", false},
+            {"agentButton", true},
+            {"agentPinned", false},
+            {"agent", "auto"},
+            {"agentModels", {{"codex", ""}, {"claude", ""}, {"opencode", ""}}},
+            {"agentEfforts", {{"codex", ""}, {"claude", ""}, {"opencode", ""}}},
             // Initial window size as a fraction of the current monitor (width 2/5, height 1/2).
             {"window", {{"widthRatio", 0.4}, {"heightRatio", 0.5}}}};
 }
@@ -378,6 +389,30 @@ Json Library::save_settings(const Json &patch)
             if (std::find(patch["wiktionary"].begin(), patch["wiktionary"].end(), site.id) != patch["wiktionary"].end())
                 sites.push_back(site.id);
         current["wiktionary"] = sites;
+    }
+    for (const char *key : {"agentEnabled", "agentButton", "agentPinned"})
+        if (patch.contains(key) && patch[key].is_boolean())
+            current[key] = patch[key];
+    if (patch.contains("agent") && patch["agent"].is_string() &&
+        (patch["agent"] == "auto" || agent_kind(patch["agent"].get<std::string>())))
+        current["agent"] = patch["agent"];
+    // Per-CLI model and reasoning effort; names that could reach a command line unsafely are ignored.
+    for (const auto &[key, validate] : {std::pair{"agentModels", &validate_agent_model}, std::pair{"agentEfforts", &validate_agent_effort}})
+    {
+        if (!patch.contains(key) || !patch[key].is_object())
+            continue;
+        if (!current[key].is_object())
+            current[key] = default_settings()[key];
+        for (const char *agent : {"codex", "claude", "opencode"})
+            if (patch[key].contains(agent) && patch[key][agent].is_string())
+                try
+                {
+                    validate(patch[key][agent].get<std::string>());
+                    current[key][agent] = patch[key][agent];
+                }
+                catch (const std::exception &)
+                {
+                }
     }
     if (patch.contains("scope") && patch["scope"].is_array() && patch["scope"].size() <= 1000)
     {
