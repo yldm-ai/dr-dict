@@ -73,3 +73,7 @@ pwsh -File .\scripts\install-uiaccess.ps1
 - `tests/` 引擎测试（生成合成的 MDX/MDD/StarDict 文件）；`tools/dict_cli.cpp` 用真实词典做验证。
 
 详见 [docs/architecture.md](docs/architecture.md)。
+
+## 许可证
+
+本项目以 [GNU 通用公共许可证第 3 版（GPL-3.0）](LICENSE) 发布。
