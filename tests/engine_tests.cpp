@@ -404,6 +404,111 @@ int main()
     CHECK(translation_direction("我喜欢 Python 编程").to == "en");
     CHECK(translation_direction("The weather is nice today.").from == "en");
     CHECK(translation_direction("I visited 北京 last year").to == "zh");
+    {
+        std::vector<HttpRequest> sent;
+        BilibiliTranslate bilibili(
+            [&](const HttpRequest &request)
+            {
+                sent.push_back(request);
+                return HttpResponse{
+                    200,
+                    R"({"choices":[{"message":{"content":" 今天天气很好。 "},"finish_reason":"stop"}]})"};
+            });
+        CHECK(BilibiliTranslate::normalize_model("") == "Index-Translate-2B");
+        CHECK(BilibiliTranslate::normalize_model("unknown") == "Index-Translate-2B");
+        auto result = bilibili.translate("  The weather is nice today.  ");
+        CHECK(result["translation"] == "今天天气很好。" && result["text"] == "The weather is nice today.");
+        CHECK(result["from"] == "en" && result["to"] == "zh");
+        CHECK(sent.size() == 1);
+        if (!sent.empty())
+        {
+            const auto &request = sent.front();
+            CHECK(request.method == "POST" &&
+                  request.url == "https://index-translate.bilibili.com/v1/chat/completions");
+            CHECK(request.limit == 1024 * 1024 && request.timeout_ms == 30000);
+            CHECK(request.headers.size() == 1 &&
+                  request.headers[0].first == "Content-Type"); // no credentials
+            const auto body = Json::parse(request.body);
+            CHECK(body["model"] == "Index-Translate-2B");
+            CHECK(body["temperature"] == 0 && body["stream"] == false &&
+                  body["chat_template_kwargs"]["enable_thinking"] == false);
+            CHECK(body["max_tokens"].get<int>() >= 5000);
+            CHECK(body["messages"].size() == 1 && body["messages"][0]["role"] == "user");
+            CHECK(body["messages"][0]["content"] == "请将以下英语文本翻译为中文，直接输出翻译结果，不要进行任"
+                                                    "何解释。\n\nThe weather is nice today.");
+        }
+        bilibili.translate("The weather is nice today.");
+        CHECK(sent.size() == 1);
+        bilibili.translate("The weather is nice today.", "Index-Translate-2B", false);
+        CHECK(sent.size() == 2); // explicit test bypasses cache
+        bilibili.translate("The weather is nice today.", "Index-Translate-9B");
+        bilibili.translate("The weather is nice today.", "Index-Translate-35B-A3B");
+        CHECK(sent.size() == 4); // models do not share cached translations
+        CHECK(Json::parse(sent.back().body)["model"] == "Index-Translate-35B-A3B");
+        bilibili.translate("The weather is nice today.", "bogus");
+        CHECK(sent.size() == 4); // invalid model falls back to cached 2B
+        result = bilibili.translate("我喜欢 Python 编程");
+        CHECK(result["from"] == "zh" && result["to"] == "en");
+        CHECK(Json::parse(sent.back().body)["messages"][0]["content"] ==
+              "请将以下中文文本翻译为英语，直接输出翻译结果，不要进行任何解释。\n\n我喜欢 Python 编程");
+        const auto before = sent.size();
+        for (const auto &input : {std::string(" \t\n"), std::string(5001, 'a')})
+        {
+            bool threw = false;
+            try
+            {
+                bilibili.translate(input);
+            }
+            catch (const std::runtime_error &)
+            {
+                threw = true;
+            }
+            CHECK(threw && sent.size() == before);
+        }
+        // Reject malformed / empty / truncated replies and HTTP failures; a failed request
+        // must not poison the cache, so the next attempt can succeed.
+        for (const auto &bad : std::vector<HttpResponse>{
+                 {200, "<html>bad gateway</html>"},
+                 {200, "[]"},
+                 {200, "{}"},
+                 {200, R"({"choices":[]})"},
+                 {200, R"({"choices":{}})"},
+                 {200, R"({"choices":[null]})"},
+                 {200, R"({"choices":[{"message":null}]})"},
+                 {200, R"({"choices":[{"message":{"content":null}}]})"},
+                 {200, R"({"choices":[{"message":{"content":"  "}}]})"},
+                 {200, R"({"choices":[{"message":{"content":"<think>reasoning"}}]})"},
+                 {200, R"({"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]})"},
+                 {200, R"({"error":{"message":"unavailable"}})"},
+                 {429, "busy"},
+                 {503, R"({"choices":[{"message":{"content":"invalid success"}}]})"}})
+        {
+            int calls = 0;
+            BilibiliTranslate retry(
+                [&](const HttpRequest &)
+                {
+                    return ++calls == 1
+                               ? bad
+                               : HttpResponse{
+                                     200,
+                                     R"({"choices":[{"message":{"content":"<think>reasoning</think> 你好 "}}]})"};
+                });
+            bool threw = false;
+            try
+            {
+                retry.translate("Hello");
+            }
+            catch (const std::runtime_error &e)
+            {
+                threw = true;
+                CHECK(std::string(e.what()).find("哔哩哔哩") != std::string::npos);
+                if (bad.status == 429)
+                    CHECK(std::string(e.what()).find("频繁") != std::string::npos);
+            }
+            CHECK(threw);
+            CHECK(retry.translate("Hello")["translation"] == "你好" && calls == 2);
+        }
+    }
     // authStr: "key=value" pairs in key order, apikey included, empty values and authStr left out.
     CHECK(NiuTrans::auth_str({{"to", "zh"}, {"from", "en"}, {"empty", ""}, {"authStr", "x"}}, "k") ==
           md5_hex("apikey=k&from=en&to=zh"));
@@ -545,6 +650,22 @@ int main()
     char temp[MAX_PATH];
     GetTempPathA(MAX_PATH, temp);
     auto root = fs::path(temp) / ("dr-dict-tests-" + std::to_string(GetCurrentProcessId()));
+    {
+        Library settings(root / "translation-settings");
+        // Older settings acquire the requested new default, while keeping the user's off switch.
+        write_file(settings.root() / "settings.json", R"({"translateSentences":false})");
+        CHECK(settings.settings()["translationProvider"] == "bilibili");
+        CHECK(settings.settings()["bilibiliModel"] == "Index-Translate-2B");
+        CHECK(settings.settings()["translateSentences"] == false);
+        settings.save_settings(
+            {{"translationProvider", "niutrans"}, {"bilibiliModel", "Index-Translate-9B"}});
+        CHECK(settings.settings()["translationProvider"] == "niutrans");
+        CHECK(settings.settings()["bilibiliModel"] == "Index-Translate-9B");
+        write_file(settings.root() / "settings.json",
+                   R"({"translationProvider":"unknown","bilibiliModel":"unknown"})");
+        CHECK(settings.settings()["translationProvider"] == "bilibili");
+        CHECK(settings.settings()["bilibiliModel"] == "Index-Translate-2B");
+    }
     fs::remove_all(root);
     auto dicts = root / "dicts";
     fs::create_directories(dicts / "sd" / "res");
@@ -848,6 +969,16 @@ int main()
             CHECK(zh.article_page(id, "软", "light", "t", "t").find("<p>軟件</p>") != std::string::npos);
         }
         // Online settings: known Wiktionary editions only, once each, in a fixed order.
+        CHECK(zh.settings()["translationProvider"] == "bilibili" &&
+              zh.settings()["bilibiliModel"] == "Index-Translate-2B");
+        CHECK(zh.save_settings({{"translationProvider", "niutrans"},
+                                {"bilibiliModel", "Index-Translate-9B"}})["translationProvider"] ==
+              "niutrans");
+        CHECK(zh.save_settings({{"translationProvider", "invalid"}})["translationProvider"] == "niutrans");
+        CHECK(zh.save_settings({{"bilibiliModel", "invalid"}})["bilibiliModel"] == "Index-Translate-2B");
+        zh.save_settings({{"translationProvider", "bilibili"}, {"bilibiliModel", "Index-Translate-35B-A3B"}});
+        CHECK(zh.settings()["translationProvider"] == "bilibili" &&
+              zh.settings()["bilibiliModel"] == "Index-Translate-35B-A3B");
         CHECK(zh.settings()["wiktionary"] == Json::array({"en"}));
         CHECK(zh.save_settings({{"wiktionary", {"zh", "xx", "en", "zh"}}})["wiktionary"] == Json::array({"en", "zh"}));
         CHECK(zh.save_settings({{"wiktionary", Json::array()}, {"translateSentences", false}})["wiktionary"].empty());

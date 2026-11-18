@@ -41,7 +41,7 @@ let agentPanel: AgentPanel | null = null;
 // Settings that change what a lookup shows (variants, translation, Wiktionary editions).
 function lookupSignature(): string {
   const s = state.settings;
-  return `${s.chineseConversion}|${s.chineseVariant}|${s.translateSentences}|${s.wiktionary.join(',')}`;
+  return `${s.chineseConversion}|${s.chineseVariant}|${s.translateSentences}|${s.translationProvider}|${s.bilibiliModel}|${s.wiktionary.join(',')}`;
 }
 
 function applyTheme(): void {

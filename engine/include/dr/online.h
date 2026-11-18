@@ -1,5 +1,5 @@
 #pragma once
-// Online sources: 小牛翻译 (NiuTrans) sentence translation and Wiktionary articles. The network
+// Online sources: Bilibili / NiuTrans sentence translation and Wiktionary articles. The network
 // itself is injected (HttpFetch), so the request building, reply parsing and HTML rewriting here
 // run in tests without it; the app supplies a WinHTTP client limited to the hosts below.
 #include "dr/paths.h"
@@ -37,7 +37,7 @@ std::string md5_hex(std::string_view data);
 /** Unicode code points in UTF-8 text (invalid bytes count one each). */
 size_t code_points(std::string_view text);
 
-// 小牛翻译 here only translates between Chinese and English: text that is mostly Han characters
+// Sentence translation here is between Chinese and English: text that is mostly Han characters
 // goes zh → en, anything else en → zh. A Han character counts as much as three Latin letters, so
 // "我喜欢 Python 编程" is Chinese and "I visited 北京 last year" is English.
 struct Direction
@@ -45,6 +45,25 @@ struct Direction
     std::string from, to;
 };
 Direction translation_direction(std::string_view text);
+
+/** Bilibili Index-Translate's public Chat Completions API; no credentials required. */
+class BilibiliTranslate
+{
+  public:
+    static constexpr const char *host = "index-translate.bilibili.com";
+    static constexpr const char *default_model = "Index-Translate-2B";
+    static constexpr size_t max_length = 5000; // app limit, shared with the optional NiuTrans provider
+    explicit BilibiliTranslate(HttpFetch fetch);
+    static std::string normalize_model(std::string_view model);
+    /** Same {text, from, to, translation} result as NiuTrans; cache is isolated by model. */
+    Json translate(const std::string &text, const std::string &model = default_model, bool cached = true);
+
+  private:
+    HttpFetch fetch_;
+    std::mutex mutex_;
+    std::map<std::string, std::string> cache_;
+    std::vector<std::string> cache_order_;
+};
 
 /**
  * 小牛翻译 text API v2 (https://niutrans.com/documents/contents/transapi_text_v2), the protocol

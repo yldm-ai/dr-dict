@@ -1,5 +1,5 @@
 // Online sources shown together with the dictionaries, in the main window and the popup:
-// - 小牛翻译: a sentence (or a word no dictionary has) is translated between Chinese and English,
+// - Bilibili / NiuTrans: a sentence (or a missing headword) is translated between Chinese and English,
 //   with a button that copies the plain translation;
 // - Wiktionary: articles from the chosen editions, after the dictionaries' own.
 import { call, escape } from './bridge.ts';
@@ -29,7 +29,7 @@ export function isSentence(text: string): boolean {
 
 /**
  * 'translate' for a sentence, or for a word the dictionaries do not have; 'setup' when a sentence
- * would be translated but no 小牛翻译 key is saved yet; null otherwise.
+ * would use NiuTrans but no key is saved yet; null otherwise.
  */
 export function translationMode(text: string, hasResults: boolean): 'translate' | 'setup' | null {
   if (!state.settings.translateSentences) return null;
@@ -37,7 +37,7 @@ export function translationMode(text: string, hasResults: boolean): 'translate' 
   if (!t.match(latinWord) && !t.match(hanCharacter)) return null; // numbers, symbols
   const sentence = isSentence(t);
   if (!sentence && hasResults) return null;
-  if (!state.niutrans.configured) return sentence ? 'setup' : null;
+  if (state.settings.translationProvider === 'niutrans' && !state.niutrans.configured) return sentence ? 'setup' : null;
   return 'translate';
 }
 
@@ -46,7 +46,7 @@ export function translationHtml(mode: 'translate' | 'setup', setupHint: string):
   if (mode === 'setup') return `<section class="translation setup">${icon('globe')}<p>${setupHint}</p></section>`;
   return `<section class="translation loading" aria-live="polite" aria-busy="true">
       <header class="translation-header">
-        <span class="translation-name">小牛翻译</span>
+        <span class="translation-name">${state.settings.translationProvider === 'niutrans' ? '小牛翻译' : '哔哩哔哩翻译'}</span>
         <span class="translation-direction"></span>
         <button class="translation-copy" type="button" title="复制译文" disabled>
           <span class="translation-copy-icon">${icon('copy')}</span><span class="translation-copy-label">复制</span>
@@ -59,24 +59,27 @@ export function translationHtml(mode: 'translate' | 'setup', setupHint: string):
 const translations = new Map<string, Translation>();
 /** Fills a translation block; `stillShown` drops the answer once another word is on screen. */
 export async function fillTranslation(section: HTMLElement, text: string, stillShown: () => boolean): Promise<void> {
-  const key = text.trim();
+  const { translationProvider, bilibiliModel } = state.settings;
+  const key = `${translationProvider}\n${bilibiliModel}\n${text.trim()}`;
+  const current = () => stillShown() && state.settings.translationProvider === translationProvider &&
+    state.settings.bilibiliModel === bilibiliModel;
   const body = section.querySelector<HTMLElement>('.translation-body')!;
   let result = translations.get(key);
   try {
     if (!result) {
-      result = await call<Translation>('translate', { text: key });
+      result = await call<Translation>('translate', { text: text.trim(), provider: translationProvider, model: bilibiliModel });
       translations.set(key, result);
       if (translations.size > 100) translations.delete(translations.keys().next().value!);
     }
   } catch (error) {
-    if (!stillShown()) return;
+    if (!current()) return;
     section.classList.remove('loading');
     section.classList.add('failed');
     section.removeAttribute('aria-busy');
     body.innerHTML = `<p class="translation-error">${escape((error as Error).message)}</p>`;
     return;
   }
-  if (!stillShown()) return;
+  if (!current()) return;
   section.classList.remove('loading');
   section.removeAttribute('aria-busy');
   section.querySelector('.translation-direction')!.textContent =

@@ -111,6 +111,7 @@ class Application
     std::string shell_override_;
     std::shared_ptr<HttpCancel> http_cancel_ = std::make_shared<HttpCancel>();
     NiuTrans niutrans_;
+    BilibiliTranslate bilibili_;
     Wiktionary wiktionary_;
     // Workers come last: they are destroyed (joined) first, before anything their jobs use.
     Worker queries_{2};

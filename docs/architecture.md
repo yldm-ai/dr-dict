@@ -71,10 +71,13 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
 
 网络请求都在 `Application::online_`（3 线程）上进行，不占用查词的 `queries_`。底层是 `app/src/http.cpp` 的 WinHTTP 客户端：只连白名单主机，不跟随重定向，响应限长，退出时 `HttpCancel` 关闭进行中的请求。协议与解析在 `engine/src/online.cpp`，以注入的 `HttpFetch` 工作，测试不联网。
 
-- **小牛翻译**（`NiuTrans`）：v2 文本接口，与 DR Music `native/niutrans.cpp` 相同的签名方式（`authStr` = 按键名排序的 `key=value`（含 apikey）用 `&` 连接后取 MD5）。
+- **在线翻译**：`translationProvider` 默认 `bilibili`，可选 `niutrans`；旧配置缺少该键时也默认使用哔哩哔哩，已保存的小牛凭据保留，需使用时在设置中选择小牛。
   - 只做中英互译：汉字数 × 3 ≥ 拉丁字母数时中译英，否则英译中（`translation_direction`）。
-  - 页面判断“长句”（`web/online.ts` 的 `isSentence`），长句以及词典里查不到的词才翻译；译文在内存中按原文缓存。
-  - App ID / API Key 用 DPAPI 加密保存在 `<数据目录>/niutrans-key.bin`，页面只能拿到 `{configured, appId}`。
+  - 页面判断“长句”（`web/online.ts` 的 `isSentence`），长句以及词典里查不到的词才翻译；每次最多 5000 字符。`translateSentences` 可关闭自动翻译。
+  - **哔哩哔哩**（`BilibiliTranslate`）：无需密钥，POST `https://index-translate.bilibili.com/v1/chat/completions`。`bilibiliModel` 可选 `Index-Translate-2B`（默认）、`Index-Translate-9B`、`Index-Translate-35B-A3B`，未知值回落至 2B。关闭思考与流式输出，temperature=0；句段输出上限 8192 tokens，接收超时 30 秒；拒绝空译文和被长度上限截断的回复。
+  - 请求设计参考 [msime-windows PR #1549](https://github.com/metasequoiaime/msime-windows/pull/1549) 与 Apache-2.0 的 [Index-Translate 官方客户端](https://github.com/bilibili/Index-Translate/blob/main/inference/llm/call_api.py)（`build_prompt` / `call_completion` / `strip_think`），在本项目 `HttpFetch` / WinHTTP 上独立实现，无新增依赖。
+  - **小牛翻译**（`NiuTrans`）：保留 v2 文本接口及 DR Music `native/niutrans.cpp` 相同的签名方式（`authStr` = 按键名排序的 `key=value`（含 apikey）用 `&` 连接后取 MD5）。App ID / API Key 继续用 DPAPI 加密保存在 `<数据目录>/niutrans-key.bin`，页面只能拿到 `{configured, appId}`。
+  - 原文只发给当前所选服务，不自动回退到其他服务。主窗口和弹窗共用原生缓存，按模型、方向、原文隔离；页面缓存按服务、模型、原文隔离。“测试翻译”跳过缓存。
 - **维基词典**（`Wiktionary`）：思路参考 GoldenDict-ng `src/dict/mediawiki.cc`，独立实现。
   - 用 `action=parse&redirects` 取页面，页面不存在时再试小写或首字母大写。超过 80 字的查询不发送。
   - 只保留相关语言的二级章节（英文版保留 English、Translingual、Chinese；中文版保留漢語、英語、跨語言），一个都没有时整页保留。

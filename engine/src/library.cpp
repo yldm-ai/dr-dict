@@ -269,9 +269,10 @@ Json Library::default_settings()
             {"popupHeight", 420},
             // Page zoom of the window (Ctrl+wheel, Ctrl +/−/0), kept across restarts.
             {"zoom", 1.0},
-            // 小牛翻译 translates sentences, and words no dictionary has, between Chinese and English
-            // (once the user has saved an App ID and API Key).
+            // Bilibili translates sentences and missing headwords without credentials by default.
             {"translateSentences", true},
+            {"translationProvider", "bilibili"},
+            {"bilibiliModel", BilibiliTranslate::default_model},
             // Wiktionary editions (dr/online.h wiki_sites) shown after the dictionaries.
             {"wiktionary", Json::array({"en"})},
             // AI 助查 through a local agent CLI (dr/agent.h). Off until the user turns it on: a
@@ -332,6 +333,9 @@ Json Library::settings()
     catch (const std::exception &)
     {
     }
+    if (result["translationProvider"] != "niutrans")
+        result["translationProvider"] = "bilibili";
+    result["bilibiliModel"] = BilibiliTranslate::normalize_model(result["bilibiliModel"].get<std::string>());
     return result;
 }
 Json Library::save_settings(const Json &patch)
@@ -381,6 +385,12 @@ Json Library::save_settings(const Json &patch)
         current["zoom"] = std::clamp(patch["zoom"].get<double>(), 0.25, 5.0);
     if (patch.contains("translateSentences") && patch["translateSentences"].is_boolean())
         current["translateSentences"] = patch["translateSentences"];
+    if (patch.contains("translationProvider") && patch["translationProvider"].is_string() &&
+        (patch["translationProvider"] == "bilibili" || patch["translationProvider"] == "niutrans"))
+        current["translationProvider"] = patch["translationProvider"];
+    if (patch.contains("bilibiliModel") && patch["bilibiliModel"].is_string())
+        current["bilibiliModel"] =
+            BilibiliTranslate::normalize_model(patch["bilibiliModel"].get<std::string>());
     if (patch.contains("wiktionary") && patch["wiktionary"].is_array())
     {
         // Known editions only, each once, in the order of wiki_sites().

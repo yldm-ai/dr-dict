@@ -88,6 +88,7 @@ Application::Application(fs::path root, fs::path assets, std::vector<fs::path> f
     : pending_lookup_(std::move(lookup)), library_(std::move(root)), assets_(std::move(assets)),
       initial_files_(std::move(files)), shell_override_(std::move(shell)),
       niutrans_(winhttp_fetch({NiuTrans::host}, http_cancel_)),
+      bilibili_(winhttp_fetch({BilibiliTranslate::host}, http_cancel_)),
       wiktionary_(winhttp_fetch({"en.wiktionary.org", "zh.wiktionary.org"}, http_cancel_))
 {
     // OpenCC data is installed beside the web assets (bin/<config>/opencc).
@@ -276,8 +277,29 @@ void Application::online(const Json &id, const std::string &method, const Json &
         try
         {
             Json result;
-            if (method == "translate")
-                result = niutrans_.translate(params.at("text").get<std::string>());
+            if (method == "translate" || method == "translation.test")
+            {
+                const auto settings = library_.settings();
+                const bool test = method == "translation.test";
+                const auto text =
+                    test ? "今天天气很好，我们去公园散步吧。" : params.at("text").get<std::string>();
+                // The page snapshots its provider/model along with the cache key; this also keeps
+                // a pinned popup consistent if the main window changes settings mid-request.
+                const auto provider =
+                    test ? settings.value("translationProvider", std::string("bilibili"))
+                         : params.value("provider",
+                                        settings.value("translationProvider", std::string("bilibili")));
+                if (provider == "niutrans")
+                    result = niutrans_.translate(text, !test);
+                else if (provider == "bilibili")
+                    result = bilibili_.translate(
+                        text,
+                        test ? settings.at("bilibiliModel").get<std::string>()
+                             : params.value("model", settings.at("bilibiliModel").get<std::string>()),
+                        !test);
+                else
+                    throw std::runtime_error("未知的翻译服务");
+            }
             else if (method == "niutrans.test")
                 result = niutrans_.translate("今天天气很好，我们去公园散步吧。", false); // not from memory
             else if (method == "wiki.lookup")
@@ -348,7 +370,7 @@ std::string popup_word(const std::wstring &text)
     }
     while (!collapsed.empty() && collapsed.back() == L' ')
         collapsed.pop_back();
-    // A paragraph is translated (小牛翻译 takes 5000 characters a request); beyond that the popup
+    // A paragraph is translated (both providers accept up to 5000 characters here); beyond that the popup
     // still opens with its start.
     if (collapsed.size() > 4000)
         collapsed.resize(4000);
@@ -724,7 +746,8 @@ void Application::receive(const Json &request, WebView &from)
         }
         if (method.starts_with("agent.") && receive_agent(id, method, params, from))
             return;
-        if (method == "translate" || method == "niutrans.test" || method == "wiki.lookup")
+        if (method == "translate" || method == "translation.test" || method == "niutrans.test" ||
+            method == "wiki.lookup")
         {
             online(id, method, params, from);
             return;

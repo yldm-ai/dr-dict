@@ -5,11 +5,14 @@ import { backgroundUrl, isHex, themes } from './appearance.ts';
 import { ColorPicker } from './color-picker.ts';
 import { agentTabShown, initAgentSettings, renderAgentSettings } from './agent-settings.ts';
 import { speak } from './speech.ts';
+import { SelectControl } from './select-control.ts';
 
 export type Tab = 'library' | 'interface' | 'article' | 'online' | 'agent' | 'data';
 const dialog = $<HTMLDialogElement>('settings-dialog');
 const tabs = [...dialog.querySelectorAll<HTMLButtonElement>('.tab')];
 let onTabChange: (tab: Tab) => void = () => {};
+const onlineControls: SelectControl[] = [];
+let testingTranslation = false;
 
 export function settingsOpen(): boolean {
   return dialog.open;
@@ -56,6 +59,12 @@ function render(): void {
 
 function renderOnline(): void {
   $<HTMLInputElement>('translate-sentences').checked = state.settings.translateSentences;
+  const bilibili = state.settings.translationProvider === 'bilibili';
+  $<HTMLSelectElement>('translation-provider').value = state.settings.translationProvider;
+  $<HTMLSelectElement>('bilibili-model').value = state.settings.bilibiliModel;
+  for (const control of onlineControls) control.sync();
+  $('bilibili-options').hidden = !bilibili;
+  $('niutrans-options').hidden = bilibili;
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input[data-wiki]'))
     input.checked = state.settings.wiktionary.includes(input.dataset.wiki!);
   const { configured, appId } = state.niutrans;
@@ -66,10 +75,16 @@ function renderOnline(): void {
   status.textContent = configured ? `已配置 · App ID ${appId}` : '尚未填写 App ID 和 API Key';
   status.dataset.state = configured ? 'ready' : 'missing';
   $<HTMLButtonElement>('niutrans-clear').disabled = !configured;
-  $<HTMLButtonElement>('niutrans-test').disabled = !configured;
+  $<HTMLButtonElement>('translation-test').disabled = testingTranslation || (!bilibili && !configured);
 }
 
 function initOnline(): void {
+  for (const id of ['translation-provider', 'bilibili-model'])
+    onlineControls.push(new SelectControl($<HTMLSelectElement>(id)));
+  $('translation-provider').addEventListener('change', (event) =>
+    void save({ translationProvider: (event.target as HTMLSelectElement).value as Settings['translationProvider'] }));
+  $('bilibili-model').addEventListener('change', (event) =>
+    void save({ bilibiliModel: (event.target as HTMLSelectElement).value as Settings['bilibiliModel'] }));
   const appId = $<HTMLInputElement>('niutrans-app-id');
   const apikey = $<HTMLInputElement>('niutrans-api-key');
   const saveKey = async (clear: boolean) => {
@@ -99,16 +114,18 @@ function initOnline(): void {
   apikey.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void saveKey(false);
   });
-  const test = $<HTMLButtonElement>('niutrans-test');
+  const test = $<HTMLButtonElement>('translation-test');
   test.addEventListener('click', async () => {
+    testingTranslation = true;
     test.disabled = true;
     test.textContent = '测试中…';
     try {
-      const result = await call<{ translation: string }>('niutrans.test');
+      const result = await call<{ translation: string }>('translation.test');
       toast(`测试成功：${result.translation}`, 'success');
     } catch (error) {
       toast(`测试失败：${(error as Error).message}`, 'error');
     } finally {
+      testingTranslation = false;
       test.textContent = '测试翻译';
       renderOnline();
     }

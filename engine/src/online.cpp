@@ -97,6 +97,97 @@ Direction translation_direction(std::string_view text)
     return {"en", "zh"};
 }
 
+BilibiliTranslate::BilibiliTranslate(HttpFetch fetch) : fetch_(std::move(fetch)) {}
+
+std::string BilibiliTranslate::normalize_model(std::string_view model)
+{
+    if (model == "Index-Translate-9B" || model == "Index-Translate-35B-A3B")
+        return std::string(model);
+    return default_model;
+}
+
+Json BilibiliTranslate::translate(const std::string &input, const std::string &requested_model, bool cached)
+{
+    const auto text = trim(input);
+    if (text.empty())
+        throw std::runtime_error("没有要翻译的文字");
+    if (code_points(text) > max_length)
+        throw std::runtime_error("文字过长，每次最多翻译 5000 个字符");
+    const auto model = normalize_model(requested_model);
+    const auto direction = translation_direction(text);
+    const auto key = model + "\n" + direction.from + ">" + direction.to + "\n" + text;
+    const auto result = [&](const std::string &translation)
+    {
+        return Json{
+            {"text", text}, {"from", direction.from}, {"to", direction.to}, {"translation", translation}};
+    };
+    if (cached)
+    {
+        std::lock_guard lock(mutex_);
+        if (const auto found = cache_.find(key); found != cache_.end())
+            return result(found->second);
+    }
+    // Protocol reference: bilibili/Index-Translate (Apache-2.0), inference/llm/call_api.py
+    // build_prompt/call_completion; also reviewed msime-windows PR #1549. Independently built
+    // on our injected HttpFetch, with a larger output budget for sentences and paragraphs.
+    const std::string source = direction.from == "zh" ? "中文" : "英语";
+    const std::string target = direction.to == "zh" ? "中文" : "英语";
+    const Json body = {
+        {"model", model},
+        {"messages", Json::array({{{"role", "user"},
+                                   {"content", "请将以下" + source + "文本翻译为" + target +
+                                                   "，直接输出翻译结果，不要进行任何解释。\n\n" + text}}})},
+        {"temperature", 0},
+        {"max_tokens", 8192},
+        {"stream", false},
+        {"chat_template_kwargs", {{"enable_thinking", false}}}};
+    HttpRequest request{"POST",
+                        std::string("https://") + host + "/v1/chat/completions",
+                        {{"Content-Type", "application/json"}},
+                        body.dump()};
+    request.limit = 1024 * 1024;
+    request.timeout_ms = 30000;
+    const auto response = fetch_(request);
+    const auto json = Json::parse(response.body, nullptr, false);
+    if (response.status == 429)
+        throw std::runtime_error("哔哩哔哩翻译请求过于频繁，请稍后再试");
+    if (response.status < 200 || response.status >= 300 || (json.is_object() && json.contains("error")))
+        throw std::runtime_error("哔哩哔哩翻译服务出错（HTTP " + std::to_string(response.status) +
+                                 "），请稍后再试");
+    if (!json.is_object())
+        throw std::runtime_error("哔哩哔哩翻译返回了无法识别的内容");
+    const auto choices = json.find("choices");
+    if (choices == json.end() || !choices->is_array() || choices->empty() || !(*choices)[0].is_object())
+        throw std::runtime_error("哔哩哔哩翻译没有返回译文");
+    const auto &choice = (*choices)[0];
+    if (choice.contains("finish_reason") && choice["finish_reason"] == "length")
+        throw std::runtime_error("哔哩哔哩翻译结果过长，请缩短原文后重试");
+    const auto message = choice.find("message");
+    if (message == choice.end() || !message->is_object() || !message->contains("content") ||
+        !(*message)["content"].is_string())
+        throw std::runtime_error("哔哩哔哩翻译没有返回译文");
+    auto translation = trim((*message)["content"].get<std::string>());
+    // Some deployments include a thought prefix even with enable_thinking=false.
+    if (const auto end = translation.find("</think>"); end != std::string::npos)
+        translation = trim(translation.substr(end + 8));
+    else if (starts_with(translation, "<think>"))
+        throw std::runtime_error("哔哩哔哩翻译没有返回译文，请重试");
+    if (translation.empty())
+        throw std::runtime_error("哔哩哔哩翻译没有返回译文");
+    {
+        std::lock_guard lock(mutex_);
+        if (!cache_.count(key))
+            cache_order_.push_back(key);
+        cache_[key] = translation;
+        while (cache_order_.size() > 200)
+        {
+            cache_.erase(cache_order_.front());
+            cache_order_.erase(cache_order_.begin());
+        }
+    }
+    return result(translation);
+}
+
 NiuTrans::NiuTrans(HttpFetch fetch, std::function<long long()> clock) : fetch_(std::move(fetch)), clock_(std::move(clock))
 {
     if (!clock_)

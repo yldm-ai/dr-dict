@@ -168,7 +168,7 @@ function render(result: LookupResult): void {
   const sentence = isSentence(result.query);
   const translation = translationMode(result.query, result.results.length > 0);
   const translationBlock = translation
-    ? translationHtml(translation, '长句可以用小牛翻译直接译成中文或英文：在主窗口的“设置 → 在线”中填写 App ID 和 API Key。')
+    ? translationHtml(translation, '小牛翻译需要 App ID 和 API Key：在主窗口的“设置 → 在线”中填写，或改用免密钥的哔哩哔哩。')
     : '';
   const paper = effectiveTheme() === 'dark' && frameTheme() === 'light';
   const shown = () => current === result;

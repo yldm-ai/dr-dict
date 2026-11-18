@@ -48,8 +48,10 @@ export type Settings = {
   scope: string[];
   // Pronunciation volume, 0–1.
   volume: number;
-  // 小牛翻译 translates sentences, and words no dictionary has (zh ↔ en).
+  // Online translation for sentences and missing headwords (zh ↔ en).
   translateSentences: boolean;
+  translationProvider: 'bilibili' | 'niutrans';
+  bilibiliModel: 'Index-Translate-2B' | 'Index-Translate-9B' | 'Index-Translate-35B-A3B';
   // Wiktionary editions shown after the dictionaries ("en", "zh").
   wiktionary: string[];
   // AI 助查 through a local agent CLI: off by default. The top bar button can be hidden; the
@@ -96,6 +98,8 @@ export const state = {
     scope: [],
     volume: 0.22,
     translateSentences: true,
+    translationProvider: 'bilibili',
+    bilibiliModel: 'Index-Translate-2B',
     wiktionary: ['en'],
     agentEnabled: false,
     agentButton: true,

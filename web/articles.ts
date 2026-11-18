@@ -135,7 +135,7 @@ function show(result: LookupResult, fromHistory = false): void {
       translation
         ? translationHtml(
             translation,
-            '长句可以用小牛翻译直接译成中文或英文。<button class="link-button" type="button" data-action="online-settings">在设置中填写 API Key</button>',
+            '小牛翻译需要 App ID 和 API Key。<button class="link-button" type="button" data-action="online-settings">前往设置，或改用免密钥的哔哩哔哩</button>',
           )
         : ''
     }`;

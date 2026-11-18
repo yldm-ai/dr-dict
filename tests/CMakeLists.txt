@@ -5,6 +5,8 @@ find_program(DR_NODE_EXECUTABLE node)
 if(DR_NODE_EXECUTABLE)
   add_test(NAME agent-prompt COMMAND "${DR_NODE_EXECUTABLE}" --experimental-strip-types --test
     "${CMAKE_CURRENT_SOURCE_DIR}/agent_tests.ts")
+  add_test(NAME online-translation COMMAND "${DR_NODE_EXECUTABLE}" --experimental-strip-types --test
+    "${CMAKE_CURRENT_SOURCE_DIR}/online_tests.ts")
 endif()
 add_executable(dr-dict-cli ../tools/dict_cli.cpp)
 target_link_libraries(dr-dict-cli PRIVATE dr_engine)

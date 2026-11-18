@@ -232,20 +232,28 @@
         <section class="tab-panel" role="tabpanel" data-panel="online" hidden>
           <div class="groups">
             <fieldset class="group wide">
-              <legend>小牛翻译</legend>
+              <legend>在线翻译</legend>
               <label class="choice"><input id="translate-sentences" type="checkbox" /><span>翻译查询的长句，以及词典里没有的词（中文译成英文，英文译成中文）</span></label>
-              <p class="group-note">译文显示在词条上方，可一键复制。要翻译的文字会发送到小牛翻译的服务器（api.niutrans.com）。</p>
-              <div class="key-fields">
-                <label class="key-field"><span>App ID</span><input id="niutrans-app-id" class="text-input" type="text" spellcheck="false" autocomplete="off" aria-label="小牛翻译 App ID" /></label>
-                <label class="key-field"><span>API Key</span><input id="niutrans-api-key" class="text-input" type="password" spellcheck="false" autocomplete="off" aria-label="小牛翻译 API Key" /></label>
+              <p class="group-note">译文显示在词条上方，可一键复制。要翻译的文字会发送给所选服务。</p>
+              <label class="key-field translation-field"><span>翻译服务</span><select id="translation-provider" aria-label="翻译服务"><option value="bilibili">哔哩哔哩</option><option value="niutrans">小牛翻译</option></select></label>
+              <div id="bilibili-options">
+                <label class="key-field translation-field"><span>翻译模型</span><select id="bilibili-model" aria-label="哔哩哔哩翻译模型"><option value="Index-Translate-2B">Index-Translate-2B</option><option value="Index-Translate-9B">Index-Translate-9B</option><option value="Index-Translate-35B-A3B">Index-Translate-35B-A3B</option></select></label>
+                <p class="group-note plain">无需 API Key，默认使用 2B 模型。原文会发送到 index-translate.bilibili.com。</p>
               </div>
-              <div class="key-actions">
-                <span id="niutrans-status" class="key-status"></span>
-                <button id="niutrans-save" class="button small primary" type="button">保存</button>
-                <button id="niutrans-clear" class="button small" type="button">清除</button>
-                <button id="niutrans-test" class="button small" type="button">测试翻译</button>
+              <div id="niutrans-options" hidden>
+                <div class="key-fields">
+                  <label class="key-field"><span>App ID</span><input id="niutrans-app-id" class="text-input" type="text" spellcheck="false" autocomplete="off" aria-label="小牛翻译 App ID" /></label>
+                  <label class="key-field"><span>API Key</span><input id="niutrans-api-key" class="text-input" type="password" spellcheck="false" autocomplete="off" aria-label="小牛翻译 API Key" /></label>
+                </div>
+                <div class="key-actions">
+                  <span id="niutrans-status" class="key-status"></span>
+                  <button id="niutrans-save" class="button small primary" type="button">保存</button>
+                  <button id="niutrans-clear" class="button small" type="button">清除</button>
+                </div>
+                <p class="group-note plain">在 niutrans.com 注册后进入“控制台 → API 应用”，开通文本翻译即可得到 App ID 和 API Key（<button id="niutrans-console" class="link-button" type="button">打开小牛翻译控制台</button>）。密钥用 Windows 数据保护加密后保存在本机。</p>
+                <p class="group-note plain">原文会发送到 api.niutrans.com。</p>
               </div>
-              <p class="group-note plain">在 niutrans.com 注册后进入“控制台 → API 应用”，开通文本翻译即可得到 App ID 和 API Key（<button id="niutrans-console" class="link-button" type="button">打开小牛翻译控制台</button>）。密钥用 Windows 数据保护加密后保存在本机。</p>
+              <div class="key-actions"><button id="translation-test" class="button small" type="button">测试翻译</button></div>
             </fieldset>
             <fieldset class="group wide">
               <legend>维基词典</legend>
