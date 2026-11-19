@@ -377,6 +377,8 @@ LRESULT Popup::handle(UINT message, WPARAM w, LPARAM l)
             on_request(payload);
         else if (data->dwData == open_request && on_open)
             on_open(payload);
+        else if (data->dwData == brief_request && on_brief && payload.size() <= 4 * 1024)
+            on_brief(payload);
         else
             return FALSE;
         return TRUE;

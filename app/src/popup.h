@@ -20,6 +20,18 @@ inline constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK"
 // DR Dict started again with the same data folder: {"files": ["utf-8 path", ...]}. The running
 // instance comes to the front and imports the files, and the new process exits (see main.cpp).
 inline constexpr ULONG_PTR open_request = 0x4E504F44; // "DOPN"
+// A short definition for another program to show inline (an input method's candidate window), no
+// popup: WM_COPYDATA with dwData = brief_request and UTF-8 JSON
+//   {"word": "...", "reply": <the sender's HWND as an integer>, "id": <any integer>, "max": <chars>}
+// The answer comes back later, never during the request: WM_COPYDATA to the reply window with
+// dwData = brief_reply, wParam = the popup host, and UTF-8 JSON
+//   {"id": <the request's id>, "word": "...", "found": bool, "headword": "...",
+//    "dictionary": "...", "text": "..."}
+// where text is the first enabled dictionary's article as plain text, cut to "max" characters
+// (default 120, at most 1000). The reply window must let WM_COPYDATA through UIPI itself
+// (ChangeWindowMessageFilterEx) when it runs with uiAccess.
+inline constexpr ULONG_PTR brief_request = 0x46425244; // "DRBF"
+inline constexpr ULONG_PTR brief_reply = 0x52425244;   // "DRBR"
 // A window property on the popup host naming its instance's data folder (instance_tag), so a
 // request reaches the instance that owns the same history and settings.
 inline constexpr wchar_t instance_property[] = L"DRDict.Instance";
@@ -81,6 +93,7 @@ class Popup
     std::function<void()> on_topmost;                      // the host has been pinned above other windows
     std::function<void(std::string_view)> on_request;      // a lookup_request's payload (see above)
     std::function<void(std::string_view)> on_open;         // an open_request's payload (see above)
+    std::function<void(std::string_view)> on_brief;        // a brief_request's payload (see above)
 
   private:
     static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l);

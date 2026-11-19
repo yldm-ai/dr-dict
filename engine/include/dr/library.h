@@ -77,6 +77,12 @@ class Library
      */
     std::string article_page(const std::string &id, const std::string &word, const std::string &theme,
                              const std::string &script = "", const std::string &variant = "");
+    /**
+     * A plain-text summary of `word` for other programs (an input method's candidate window):
+     * {word, found, headword, dictionary, text}. `text` is the first enabled dictionary's article
+     * with markup removed, its leading headword dropped and cut to `max_chars` characters.
+     */
+    Json brief(const std::string &word, size_t max_chars);
     std::string about_page(const std::string &id, const std::string &theme);
     std::optional<Resource> resource(const std::string &id, const std::string &path);
     std::optional<Resource> icon(const std::string &id);
@@ -103,6 +109,9 @@ class Library
     std::vector<std::pair<int, std::string>> enabled_numbers(const std::vector<std::string> &scope = {});
     Json status(const Json &meta);
     std::string page(const std::string &theme, const std::string &body);
+    // Article HTML for `word` in one dictionary, redirects followed, at most `limit` articles.
+    std::vector<std::string> articles(const std::string &id, const std::string &word,
+                                      size_t limit = static_cast<size_t>(-1));
 
     fs::path root_;
     std::mutex mutex_;    // dictionaries.json, settings, history and the open cache

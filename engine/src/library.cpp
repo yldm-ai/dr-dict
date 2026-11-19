@@ -1293,8 +1293,7 @@ std::string Library::page(const std::string &theme, const std::string &body)
            body + "</body></html>";
 }
 
-std::string Library::article_page(const std::string &id, const std::string &word, const std::string &theme,
-                                  const std::string &script, const std::string &variant)
+std::vector<std::string> Library::articles(const std::string &id, const std::string &word, size_t limit)
 {
     auto dict = open(id);
     int num = 0;
@@ -1320,11 +1319,10 @@ std::string Library::article_page(const std::string &id, const std::string &word
         if (fold_key(writing) != fold_key(word))
             collect(writing);
     std::set<uint64_t> seen;
-    std::string body;
-    int articles = 0;
+    std::vector<std::string> result;
     // Reference: GoldenDict-ng mdx.cc MdxArticleRequest::run follows "@@@LINK=" by queueing the
     // target's articles; here the hop count is bounded so redirect cycles terminate.
-    for (size_t i = 0; i < queue.size() && i < 64; ++i)
+    for (size_t i = 0; i < queue.size() && i < 64 && result.size() < limit; ++i)
     {
         auto [a, b] = queue[i];
         if (!seen.insert(a).second)
@@ -1339,6 +1337,18 @@ std::string Library::article_page(const std::string &id, const std::string &word
             collect(target);
             continue;
         }
+        result.push_back(std::move(text));
+    }
+    return result;
+}
+
+std::string Library::article_page(const std::string &id, const std::string &word, const std::string &theme,
+                                  const std::string &script, const std::string &variant)
+{
+    std::string body;
+    int articles = 0;
+    for (auto &text : this->articles(id, word))
+    {
         if (articles++)
             body += "<hr class=\"dr-separator\">";
         body += "<div class=\"dr-entry\">" + text + "</div>";
@@ -1361,6 +1371,46 @@ std::string Library::article_page(const std::string &id, const std::string &word
             body = chinese->convert_html(body, script, standard);
     }
     return page(theme, body);
+}
+
+Json Library::brief(const std::string &input, size_t max_chars)
+{
+    const auto word = trim(input);
+    Json result = {{"word", word}, {"found", false}};
+    if (word.empty())
+        return result;
+    // Same search as the popup (variants, English base forms), then the first enabled dictionary
+    // whose article has any text: dictionaries are tried in the user's order.
+    auto found = lookup(word);
+    const auto headword = found.value("word", word);
+    if (!found.contains("results") || !found["results"].is_array())
+        return result;
+    for (const auto &hit : found["results"])
+    {
+        const auto id = hit.value("id", std::string());
+        if (id.empty())
+            continue;
+        for (auto &html : articles(id, headword, 4))
+        {
+            auto text = article_text(html);
+            // Most articles open with their headword; the caller already shows the word. Compared
+            // byte for byte apart from ASCII case, and only when a word boundary follows it.
+            const size_t n = headword.size();
+            if (n < text.size() && lower_ascii(text.substr(0, n)) == lower_ascii(headword) &&
+                !std::isalnum(static_cast<unsigned char>(text[n])) && static_cast<unsigned char>(text[n]) < 0x80)
+                text = trim(text.substr(n));
+            else if (n == text.size() && lower_ascii(text) == lower_ascii(headword))
+                text.clear();
+            if (text.empty())
+                continue;
+            result["found"] = true;
+            result["headword"] = headword;
+            result["dictionary"] = hit.value("name", std::string());
+            result["text"] = truncate_text(text, max_chars);
+            return result;
+        }
+    }
+    return result;
 }
 
 std::string Library::about_page(const std::string &id, const std::string &theme)
