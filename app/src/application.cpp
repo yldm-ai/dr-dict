@@ -6,6 +6,7 @@
 #include <dpapi.h>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cwchar>
 #include <cwctype>
 #include <stdexcept>
@@ -533,6 +534,31 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
         // {"word": "...", "x": …, "y": …, "caret": […], "keyboard": …} from another program (see popup.h).
         if (auto request = parse_lookup_payload(payload))
             request_lookup(std::move(*request));
+    };
+    // An input method asks for a short definition to show next to a candidate (see popup.h). The
+    // request returns at once; the answer is sent from the query worker, so a slow dictionary never
+    // holds up the sender or this window.
+    popup_.on_brief = [this](std::string_view payload) {
+        auto request = Json::parse(payload, nullptr, false);
+        if (!request.is_object() || !request.contains("word") || !request["word"].is_string() ||
+            !request.contains("reply") || !request["reply"].is_number_integer())
+            return;
+        const HWND reply = reinterpret_cast<HWND>(static_cast<INT_PTR>(request["reply"].get<std::int64_t>()));
+        if (!IsWindow(reply))
+            return;
+        Json id = request.contains("id") && request["id"].is_number_integer() ? request["id"] : Json(0);
+        size_t max_chars = 120;
+        if (request.contains("max") && request["max"].is_number_unsigned())
+            max_chars = std::clamp<size_t>(request["max"].get<size_t>(), 1, 1000);
+        queries_.enqueue([this, reply, id, max_chars, word = request["word"].get<std::string>()] {
+            Json answer = library_.brief(word, max_chars);
+            answer["id"] = id;
+            const std::string text = answer.dump();
+            COPYDATASTRUCT data{brief_reply, static_cast<DWORD>(text.size()), const_cast<char *>(text.data())};
+            DWORD_PTR handled = 0;
+            SendMessageTimeoutW(reply, WM_COPYDATA, reinterpret_cast<WPARAM>(popup_.handle()),
+                                reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &handled);
+        });
     };
     // DR Dict started again (see main.cpp): come to the front and take the files it was given.
     popup_.on_open = [this](std::string_view payload) {

@@ -1,5 +1,8 @@
 #include "dr/text.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <iterator>
 #include <stdexcept>
 #include <vector>
 #include <windows.h>
@@ -275,5 +278,84 @@ std::string strip_tags(std::string_view html)
             out.push_back(c);
     }
     return trim(decode_entities(out));
+}
+std::string article_text(std::string_view html)
+{
+    // Tags whose content is not text, and tags that end a line or block (a space stands for them,
+    // so "<b>n.</b><br>apple" reads "n. apple" instead of "n.apple").
+    static const std::string_view hidden[] = {"script", "style", "head", "title"};
+    static const std::string_view breaking[] = {"br", "p", "div", "li", "ul", "ol", "tr", "td", "th", "table",
+                                                "h1", "h2", "h3", "h4", "h5", "h6", "hr", "dd", "dt", "dl",
+                                                "blockquote", "section"};
+    std::string out;
+    out.reserve(html.size());
+    size_t i = 0;
+    while (i < html.size())
+    {
+        if (html[i] != '<')
+        {
+            out.push_back(html[i++]);
+            continue;
+        }
+        const auto end = html.find('>', i);
+        if (end == std::string_view::npos)
+            break;
+        auto tag = html.substr(i + 1, end - i - 1);
+        const bool closing = !tag.empty() && tag.front() == '/';
+        if (closing)
+            tag.remove_prefix(1);
+        size_t name_end = 0;
+        while (name_end < tag.size() && std::isalnum(static_cast<unsigned char>(tag[name_end])))
+            ++name_end;
+        const auto name = lower_ascii(tag.substr(0, name_end));
+        i = end + 1;
+        if (!closing && std::find(std::begin(hidden), std::end(hidden), name) != std::end(hidden))
+        {
+            // Skip to the matching close tag; without one, drop the rest.
+            const auto close = lower_ascii(html.substr(i)).find("</" + name);
+            if (close == std::string::npos)
+                break;
+            const auto after = html.find('>', i + close);
+            i = after == std::string_view::npos ? html.size() : after + 1;
+            continue;
+        }
+        if (std::find(std::begin(breaking), std::end(breaking), name) != std::end(breaking))
+            out.push_back(' ');
+    }
+    // Entities first, so &nbsp; also collapses into the single spaces below.
+    const auto decoded = decode_entities(out);
+    std::string text;
+    text.reserve(decoded.size());
+    bool space = false;
+    for (size_t j = 0; j < decoded.size(); ++j)
+    {
+        const unsigned char c = static_cast<unsigned char>(decoded[j]);
+        const bool nbsp = c == 0xc2 && j + 1 < decoded.size() && static_cast<unsigned char>(decoded[j + 1]) == 0xa0;
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v' || nbsp)
+        {
+            space = true;
+            if (nbsp)
+                ++j;
+            continue;
+        }
+        if (space && !text.empty())
+            text.push_back(' ');
+        space = false;
+        text.push_back(decoded[j]);
+    }
+    return text;
+}
+std::string truncate_text(std::string_view text, size_t max_chars)
+{
+    size_t chars = 0;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        // Count code points: every byte that does not continue a UTF-8 sequence starts one.
+        if ((static_cast<unsigned char>(text[i]) & 0xc0) == 0x80)
+            continue;
+        if (chars++ == max_chars)
+            return trim(text.substr(0, i)) + "\xe2\x80\xa6"; // …
+    }
+    return std::string(text);
 }
 } // namespace dr

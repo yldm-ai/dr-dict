@@ -16,6 +16,11 @@ std::string fold_key(std::string_view utf8);
 std::string html_escape(std::string_view text);
 std::string decode_entities(std::string_view text);
 std::string strip_tags(std::string_view html);
+// An article's readable text on one line: markup and script/style content removed, line and block
+// breaks turned into spaces, entities decoded and runs of whitespace collapsed.
+std::string article_text(std::string_view html);
+// At most `max_chars` code points of UTF-8 `text`, ending in "…" when cut.
+std::string truncate_text(std::string_view text, size_t max_chars);
 std::string lower_ascii(std::string_view text);
 // Unicode-aware lowercase used for case-insensitive resource names.
 std::string lower_text(std::string_view text);

@@ -389,6 +389,14 @@ int main()
     CHECK(to_utf8(std::string("\xc4\xe3\xba\xc3", 4), "GBK") == "你好");
     CHECK(apply_mdict_styles("`1`bold`2`plain", {{1, {"<b>", "</b>"}}}) == "<b>bold</b>plain");
     CHECK(decode_entities("&lt;a&gt; &amp; &#x27;q&#39;") == "<a> & 'q'");
+    CHECK(article_text("<style>b{}</style><b>n.</b><br>apple&nbsp;&amp;\n  pear<SCRIPT>x()</SCRIPT>") ==
+          "n. apple & pear");
+    CHECK(article_text("<div>a</div><div>b</div>") == "a b");
+    CHECK(article_text("x<i>y</i>z") == "xyz");
+    CHECK(article_text("<span>unclosed") == "unclosed");
+    CHECK(truncate_text("苹果树", 2) == "苹果\xe2\x80\xa6");
+    CHECK(truncate_text("abc", 3) == "abc");
+    CHECK(truncate_text("ab cd", 3) == "ab\xe2\x80\xa6");
     auto forms = english_base_forms("studies");
     CHECK(std::find(forms.begin(), forms.end(), "study") != forms.end());
     forms = english_base_forms("running");
@@ -740,6 +748,16 @@ int main()
         auto star = library.article_page(sd_id, "hello", "dark");
         CHECK(star.find("hello world<br>second line") != std::string::npos);
         CHECK(library.article_page(sd_id, "goodbye", "light").find("goodbye") != std::string::npos);
+
+        // The plain-text summary input methods ask for (popup.h brief_request).
+        auto brief = library.brief("Hello", 120);
+        CHECK(brief["found"] == true);
+        CHECK(brief["dictionary"] == "Star Test");
+        CHECK(brief["text"] == "world second line"); // leading headword dropped, <br> read as a space
+        CHECK(library.brief("hello", 5)["text"] == "world\xe2\x80\xa6");
+        CHECK(library.brief("hi", 120)["headword"] == "hi");
+        CHECK(library.brief("nosuchword", 120)["found"] == false);
+        CHECK(library.brief("  ", 120)["found"] == false);
 
         auto css = library.resource(mdx_id, "demo.css");
         CHECK(css && css->data == "b{color:red}" && css->mime == "text/css");
