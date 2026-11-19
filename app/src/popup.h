@@ -28,7 +28,11 @@ inline constexpr ULONG_PTR open_request = 0x4E504F44; // "DOPN"
 //   {"id": <the request's id>, "word": "...", "found": bool, "headword": "...",
 //    "dictionary": "...", "text": "..."}
 // where text is the first enabled dictionary's article as plain text, cut to "max" characters
-// (default 120, at most 1000). The reply window must let WM_COPYDATA through UIPI itself
+// (default 120, at most 1000). Two optional request fields pick what is answered: "brief": false
+// leaves the summary out (found stays false), and "phonetics": true adds
+//   "phonetics": {"uk": "...", "us": "...", "dictionary": "..."}
+// with the British and American pronunciations (no slashes) from the first dictionary that marks
+// them up the Oxford way, or {} when none does. The reply window must let WM_COPYDATA through UIPI itself
 // (ChangeWindowMessageFilterEx) when it runs with uiAccess.
 inline constexpr ULONG_PTR brief_request = 0x46425244; // "DRBF"
 inline constexpr ULONG_PTR brief_reply = 0x52425244;   // "DRBR"

@@ -397,6 +397,24 @@ int main()
     CHECK(truncate_text("苹果树", 2) == "苹果\xe2\x80\xa6");
     CHECK(truncate_text("abc", 3) == "abc");
     CHECK(truncate_text("ab cd", 3) == "ab\xe2\x80\xa6");
+    {
+        // OALDPE markup: British first, American second; later senses' transcriptions are ignored.
+        const auto oxford = oxford_phonetics(
+            "<span class=\"phonetics\"> <div class=\"phons_br\"><a class=\"sound pron-uk\" href=\"sound://a.mp3\">"
+            "</a><span class=\"phon\">/t\xc9\x99\xcb\x88m\xc9\x91\xcb\x90t\xc9\x99\xca\x8a/</span></div> "
+            "<div class=\"phons_n_am\"><a class=\"sound pron-us\"></a><span class=\"phon\">/t\xc9\x99\xcb\x88"
+            "me\xc9\xaat\xc9\x99\xca\x8a/</span></div></span>"
+            "<div class=\"phons_br\"><span class=\"phon\">/other/</span></div>");
+        CHECK(oxford.uk == "t\xc9\x99\xcb\x88m\xc9\x91\xcb\x90t\xc9\x99\xca\x8a"); // təˈmɑːtəʊ
+        CHECK(oxford.us == "t\xc9\x99\xcb\x88me\xc9\xaat\xc9\x99\xca\x8a");         // təˈmeɪtəʊ
+        // "phons_br" itself contains "phon"; only the whole class token counts.
+        CHECK(oxford_phonetics("<div class=\"phons_br\"></div><span class=\"phon\">/x/</span>").uk.empty());
+        CHECK(oxford_phonetics("<div class=\"phons_n_am\"><span class=\"phon\">/x/</span></div>").uk.empty());
+        CHECK(oxford_phonetics("<div class=\"phons_n_am\"><span class=\"phon\">/x/</span></div>").us == "x");
+        CHECK(oxford_phonetics("<span class=\"phon\">/x/</span>").us.empty());
+        CHECK(oxford_phonetics("<h1 class=\"headword\" id=\"a\">ice <span>cream</span></h1>").headword == "ice cream");
+        CHECK(oxford.headword.empty());
+    }
     auto forms = english_base_forms("studies");
     CHECK(std::find(forms.begin(), forms.end(), "study") != forms.end());
     forms = english_base_forms("running");

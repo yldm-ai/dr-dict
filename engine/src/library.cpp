@@ -1413,6 +1413,39 @@ Json Library::brief(const std::string &input, size_t max_chars)
     return result;
 }
 
+Json Library::phonetics(const std::string &input)
+{
+    const auto word = trim(input);
+    Json result = Json::object();
+    if (word.empty())
+        return result;
+    auto found = lookup(word);
+    const auto headword = found.value("word", word);
+    if (lower_text(headword) != lower_text(word) || !found.contains("results") || !found["results"].is_array())
+        return result;
+    for (const auto &hit : found["results"])
+    {
+        const auto id = hit.value("id", std::string());
+        if (id.empty())
+            continue;
+        for (auto &html : articles(id, headword, 4))
+        {
+            auto phonetics = oxford_phonetics(html);
+            if (phonetics.uk.empty() && phonetics.us.empty())
+                continue;
+            // OALDPE files an inflection as a redirect to its base entry (studies → study); those
+            // transcriptions are the base form's, so the word has none here.
+            if (!phonetics.headword.empty() && lower_text(phonetics.headword) != lower_text(word))
+                continue;
+            result["uk"] = phonetics.uk;
+            result["us"] = phonetics.us;
+            result["dictionary"] = hit.value("name", std::string());
+            return result;
+        }
+    }
+    return result;
+}
+
 std::string Library::about_page(const std::string &id, const std::string &theme)
 {
     auto dict = open(id);

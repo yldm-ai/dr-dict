@@ -358,4 +358,71 @@ std::string truncate_text(std::string_view text, size_t max_chars)
     }
     return std::string(text);
 }
+namespace
+{
+// Where `name` appears in `html` as a whole token (bounded by quotes or spaces, as inside a class
+// attribute), starting the search at `from`.
+size_t find_class_token(std::string_view html, std::string_view name, size_t from)
+{
+    const auto edge = [](char c) { return c == '"' || c == '\'' || c == ' '; };
+    for (size_t at = html.find(name, from); at != std::string_view::npos; at = html.find(name, at + name.size()))
+    {
+        const size_t after = at + name.size();
+        if (at > 0 && edge(html[at - 1]) && after < html.size() && edge(html[after]))
+            return at;
+    }
+    return std::string_view::npos;
+}
+// The first <… class="phon">…</…> inside the first element of class `block`, slashes removed.
+std::string first_phon(std::string_view html, std::string_view block)
+{
+    for (size_t at = find_class_token(html, block, 0); at != std::string_view::npos;
+         at = find_class_token(html, block, at + block.size()))
+    {
+        // phons_br / phons_n_am are divs holding only a sound link and phon spans, so the block
+        // ends at the next </div>.
+        const auto end = html.find("</div>", at);
+        const auto inside = html.substr(at, end == std::string_view::npos ? std::string_view::npos : end - at);
+        const auto phon = find_class_token(inside, "phon", 0);
+        if (phon == std::string_view::npos)
+            continue;
+        const auto open_end = inside.find('>', phon);
+        const auto close = inside.find("</span>", open_end);
+        if (open_end == std::string_view::npos || close == std::string_view::npos)
+            continue;
+        auto text = strip_tags(inside.substr(open_end + 1, close - open_end - 1));
+        while (!text.empty() && text.front() == '/')
+            text.erase(text.begin());
+        while (!text.empty() && text.back() == '/')
+            text.pop_back();
+        text = trim(text);
+        if (!text.empty())
+            return text;
+    }
+    return {};
+}
+// The text of the first element of class `name` (<h1 class="headword" …>ice cream</h1>).
+std::string first_element_text(std::string_view html, std::string_view name)
+{
+    const auto at = find_class_token(html, name, 0);
+    if (at == std::string_view::npos)
+        return {};
+    const auto open = html.rfind('<', at);
+    const auto open_end = html.find('>', at);
+    if (open == std::string_view::npos || open_end == std::string_view::npos)
+        return {};
+    size_t tag_end = open + 1;
+    while (tag_end < html.size() && std::isalnum(static_cast<unsigned char>(html[tag_end])))
+        ++tag_end;
+    const auto tag = html.substr(open + 1, tag_end - open - 1);
+    const auto close = html.find("</" + std::string(tag), open_end);
+    if (tag.empty() || close == std::string_view::npos)
+        return {};
+    return trim(strip_tags(html.substr(open_end + 1, close - open_end - 1)));
+}
+} // namespace
+Phonetics oxford_phonetics(std::string_view html)
+{
+    return {first_phon(html, "phons_br"), first_phon(html, "phons_n_am"), first_element_text(html, "headword")};
+}
 } // namespace dr

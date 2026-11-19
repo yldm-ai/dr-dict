@@ -66,6 +66,7 @@ engine/ Library ── index.db (SQLite WAL) + dictionaries.json / settings.json
   - 由键盘唤起的查询（水杉输入法的查词快捷键）另带两个可选字段：`"caret": [left, top, right, bottom]` 是文字光标所在行的屏幕矩形，弹窗像候选窗一样开在它下方，放不下时开在上方；`"keyboard": true` 表示不是鼠标唤起的，弹窗不按鼠标位置自动关闭（鼠标多半停在远处，按 Ctrl+C+C 的规则会在第一次检测时就关掉），仍在 Esc、点击别处或其他窗口激活时关闭。
   - DR Dict 未运行时，用 `dr-dict.exe --lookup <词> [--caret l,t,r,b] [--keyboard]` 启动：页面就绪、弹窗置顶后再显示（约 1.5 秒）。若已有实例在运行，`--lookup` 只把词（连同上面两项）转交给它，然后退出。
   - **简短释义**（水杉输入法英文候选模式里高亮候选下方的释义）：不开弹窗，只取一段纯文本。发送 `WM_COPYDATA`，`dwData = 0x46425244`（"DRBF"），数据是 `{"word": "...", "reply": 发送方窗口句柄（整数）, "id": 任意整数, "max": 字数上限}`。请求立即返回，查询在 `queries_` 工作线程上做，查完再向 `reply` 窗口发 `WM_COPYDATA`：`dwData = 0x52425244`（"DRBR"），`wParam` 是弹窗宿主，数据是 `{"id", "word", "found", "headword", "dictionary", "text"}`。`text` 取用户排序里第一本查到正文的词典（与弹窗相同的查法：简繁变体、英文词形还原），去掉标签、脚本和样式，换行与块级标签读作空格，去掉开头的词头，截到 `max` 个字（默认 120，最多 1000），截断时以「…」结尾。回复窗口若运行在 uiAccess 下，要自己用 `ChangeWindowMessageFilterEx` 放行 `WM_COPYDATA`。DR Dict 没在运行时不会有回复，调用方应当只把它当作可选的补充。
+  - **音标**：同一个请求另带两个可选字段决定回答什么：`"brief": false` 不取摘要（回复里 `found` 为假），`"phonetics": true` 在回复里加上 `"phonetics": {"uk": "...", "us": "...", "dictionary": "..."}`，即英式与美式音标（不带斜杠）。音标取用户排序里第一本按牛津高阶（OALDPE）方式标注音标的词典：`<div class="phons_br">` / `<div class="phons_n_am">` 里的第一个 `<span class="phon">`，只认该词自己的词条（词形还原到原形的不算，原形读音不同）；查不到时是 `{}`。旧版 DR Dict 不认这两个字段，照旧只回摘要，回复里没有 `phonetics`，调用方据此退回自己的音标。
   - DR Dict 每次启动都会把自身路径写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\dr-dict.exe`，其他程序可以直接用 `ShellExecute("dr-dict.exe")` 启动它。这里记录的是最近一次运行的那个副本。
 
 ## 在线来源

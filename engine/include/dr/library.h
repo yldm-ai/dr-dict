@@ -83,6 +83,13 @@ class Library
      * with markup removed, its leading headword dropped and cut to `max_chars` characters.
      */
     Json brief(const std::string &word, size_t max_chars);
+    /**
+     * British and American pronunciations of `word` for other programs: {"uk", "us", "dictionary"}
+     * from the first enabled dictionary that marks them up the Oxford way (text.h oxford_phonetics),
+     * or an empty object. Only an entry for the word itself counts, not one for its base form
+     * (the base form is pronounced differently).
+     */
+    Json phonetics(const std::string &word);
     std::string about_page(const std::string &id, const std::string &theme);
     std::optional<Resource> resource(const std::string &id, const std::string &path);
     std::optional<Resource> icon(const std::string &id);

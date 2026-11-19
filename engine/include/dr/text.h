@@ -21,6 +21,19 @@ std::string strip_tags(std::string_view html);
 std::string article_text(std::string_view html);
 // At most `max_chars` code points of UTF-8 `text`, ending in "…" when cut.
 std::string truncate_text(std::string_view text, size_t max_chars);
+// British and American pronunciations as the Oxford Advanced Learner's Dictionary marks them up
+// (OALDPE: <div class="phons_br"><a class="sound …"></a><span class="phon">/həˈləʊ/</span></div>,
+// and phons_n_am for American English). Only the entry's first transcription of each is taken,
+// without the enclosing slashes; a side the article doesn't mark is left empty. `headword` is the
+// entry's <h1 class="headword">, so a caller can tell that an inflection redirected to its base
+// form (studies → study) and the transcriptions belong to the base form.
+struct Phonetics
+{
+    std::string uk;
+    std::string us;
+    std::string headword;
+};
+Phonetics oxford_phonetics(std::string_view html);
 std::string lower_ascii(std::string_view text);
 // Unicode-aware lowercase used for case-insensitive resource names.
 std::string lower_text(std::string_view text);

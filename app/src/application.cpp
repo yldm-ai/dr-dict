@@ -550,8 +550,17 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
         size_t max_chars = 120;
         if (request.contains("max") && request["max"].is_number_unsigned())
             max_chars = std::clamp<size_t>(request["max"].get<size_t>(), 1, 1000);
-        queries_.enqueue([this, reply, id, max_chars, word = request["word"].get<std::string>()] {
-            Json answer = library_.brief(word, max_chars);
+        // Both optional: "brief": false skips the summary, "phonetics": true adds the pronunciations.
+        const auto flag = [&request](const char *name, bool fallback) {
+            return request.contains(name) && request[name].is_boolean() ? request[name].get<bool>() : fallback;
+        };
+        const bool want_brief = flag("brief", true);
+        const bool want_phonetics = flag("phonetics", false);
+        queries_.enqueue([this, reply, id, max_chars, want_brief, want_phonetics,
+                          word = request["word"].get<std::string>()] {
+            Json answer = want_brief ? library_.brief(word, max_chars) : Json{{"word", trim(word)}, {"found", false}};
+            if (want_phonetics)
+                answer["phonetics"] = library_.phonetics(word);
             answer["id"] = id;
             const std::string text = answer.dump();
             COPYDATASTRUCT data{brief_reply, static_cast<DWORD>(text.size()), const_cast<char *>(text.data())};

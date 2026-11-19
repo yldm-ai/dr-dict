@@ -1,6 +1,7 @@
 // Command-line access to the engine for validating real dictionaries outside the GUI.
 //   dr-dict-cli <data-dir> add <file-or-folder>...
 //   dr-dict-cli <data-dir> list | folders | rescan | remove <dict-id> | suggest <prefix> | lookup <word>
+//   dr-dict-cli <data-dir> brief <word> | phonetics <word>
 //   dr-dict-cli <data-dir> variants <chinese-word> [t|tw|twp|hk|all]
 //   dr-dict-cli <data-dir> article <dict-id> <word> | resource <dict-id> <path> [save-as]
 //   dr-dict-cli <data-dir> wiki <en|zh> <saved-parse-reply.json> [save-as.html]
@@ -57,6 +58,10 @@ int wmain(int argc, wchar_t **argv)
             std::cout << library.suggest(arg(3), 20).dump(2) << "\n";
         else if (command == "lookup")
             std::cout << library.lookup(arg(3)).dump(2) << "\n";
+        else if (command == "brief")
+            std::cout << library.brief(arg(3), 120).dump(2) << "\n";
+        else if (command == "phonetics")
+            std::cout << library.phonetics(arg(3)).dump(2) << "\n";
         else if (command == "variants")
         {
             // Other writings of a Chinese word, independent of the saved settings.
