@@ -32,6 +32,17 @@ inline constexpr ULONG_PTR open_request = 0x4E504F44; // "DOPN"
 // (ChangeWindowMessageFilterEx) when it runs with uiAccess.
 inline constexpr ULONG_PTR brief_request = 0x46425244; // "DRBF"
 inline constexpr ULONG_PTR brief_reply = 0x52425244;   // "DRBR"
+// An input method keeps the popup docked beside its candidate window while the user moves through
+// English candidates: WM_COPYDATA with dwData = dock_request and UTF-8 JSON
+//   {"word": "...", "rect": [left, top, right, bottom]}  look the word up; rect is the candidate
+//                                                         window's visible card in screen pixels
+//   {"hide": true}                                       the candidate window has closed
+// The popup goes flush against the rect's right edge, or its left edge when the right side has no
+// room, top aligned with it and kept on the work area (dock_placement.h). A docked popup never
+// takes focus or the foreground (the user is typing in another program), ignores the pointer, and
+// its lookups stay out of the history. "hide" closes only a docked popup that is not pinned, and
+// cancels a docked lookup that has not been shown yet. The same word with a new rect only moves it.
+inline constexpr ULONG_PTR dock_request = 0x4B434F44; // "DOCK"
 // A window property on the popup host naming its instance's data folder (instance_tag), so a
 // request reaches the instance that owns the same history and settings.
 inline constexpr wchar_t instance_property[] = L"DRDict.Instance";
@@ -42,6 +53,7 @@ struct PopupAnchor
     POINT point{};              // beside this point (the pointer, or the point a program sent)
     std::optional<RECT> caret;  // below (or above) this caret line instead, when known
     bool keyboard = false;      // summoned by a key: no pointer-leave auto-hide
+    std::optional<RECT> dock;   // docked beside an input method's candidate window (dock_request)
 };
 
 // The Ctrl+C+C lookup popup's host window: borderless, resizable from a thin edge around the
@@ -72,6 +84,8 @@ class Popup
     void show_at(const PopupAnchor &anchor);
     void hide();
     bool visible() const { return hwnd_ && IsWindowVisible(hwnd_); }
+    /** Shown docked beside a candidate window (PopupAnchor::dock) rather than summoned. */
+    bool docked() const { return docked_ && visible(); }
     void set_pinned(bool pinned);
     bool pinned() const { return pinned_; }
     /** Pins the host above other windows; call once its WebView has painted (see above). */
@@ -94,6 +108,7 @@ class Popup
     std::function<void(std::string_view)> on_request;      // a lookup_request's payload (see above)
     std::function<void(std::string_view)> on_open;         // an open_request's payload (see above)
     std::function<void(std::string_view)> on_brief;        // a brief_request's payload (see above)
+    std::function<void(std::string_view)> on_dock;         // a dock_request's payload (see above)
 
   private:
     static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l);
@@ -101,12 +116,14 @@ class Popup
     int scale(int value) const;
     void layout();
     void track_pointer();
+    void show_docked(const RECT &anchor);
 
     HWND hwnd_ = nullptr;
     HWND previous_ = nullptr; // the window that had focus before the popup took it
     HBRUSH brush_ = nullptr;
     bool pinned_ = false;
     bool keyboard_ = false; // summoned by a key: the pointer does not hide it
+    bool docked_ = false;   // beside a candidate window: never activated
     bool topmost_ = false;
     int width_ = 360, height_ = 420;
     // Pointer tracking while unpinned.

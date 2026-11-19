@@ -53,6 +53,9 @@ struct LookupRequest
 // without x/y opens beside the pointer.
 std::string lookup_payload(const LookupRequest &request);
 std::optional<LookupRequest> parse_lookup_payload(std::string_view payload);
+// A dock_request's payload (popup.h): the word to show docked beside its rect, or `hide` set and
+// nullopt for {"hide": true}. Malformed payloads give nullopt with `hide` false.
+std::optional<LookupRequest> parse_dock_payload(std::string_view payload, bool &hide);
 // "left,top,right,bottom" (--caret) as a rectangle; nullopt unless four integers with
 // left <= right and top <= bottom.
 std::optional<RECT> parse_caret_argument(const std::wstring &text);
@@ -75,7 +78,8 @@ class Application
     void copied_twice();
     // Lookups asked for by other programs; held until the popup is up and pinned.
     void request_lookup(LookupRequest request);
-    void send_popup_lookup(const std::string &word);
+    // `docked`: beside an input method's candidate window; the page keeps it out of the history.
+    void send_popup_lookup(const std::string &word, bool docked = false);
     void resource(const std::wstring &uri, std::function<void(ResourceReply)> respond);
     std::vector<fs::path> pick_files();
     fs::path pick_folder();
@@ -104,6 +108,10 @@ class Application
     WebView popup_view_;
     CopyHotkey hotkey_;
     PopupAnchor popup_anchor_{};
+    // The word docked beside a candidate window, and whether that window has closed since the last
+    // dock request (a lookup still being rendered then is not shown). UI thread only.
+    std::string docked_word_;
+    bool dock_cancelled_ = false;
     std::optional<LookupRequest> pending_lookup_;
     Library library_;
     fs::path assets_;

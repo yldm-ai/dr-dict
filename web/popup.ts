@@ -63,18 +63,27 @@ function updateNavigation(): void {
   $<HTMLButtonElement>('popup-forward').disabled = navigation.index >= navigation.stack.length - 1;
 }
 
-async function lookup(word: string, options: { push?: boolean; show?: boolean } = {}): Promise<void> {
+async function lookup(
+  word: string,
+  options: { push?: boolean; show?: boolean; remember?: boolean } = {},
+): Promise<void> {
   const text = word.trim();
   if (!text) return;
   const ticket = ++sequence;
   let result: LookupResult;
   try {
-    result = await call<LookupResult>('lookup', { word: text, dicts: scope() });
+    result = await call<LookupResult>('lookup', { word: text, dicts: scope(), remember: options.remember !== false });
   } catch (error) {
     toast((error as Error).message, 'error');
     return;
   }
   if (ticket !== sequence) return;
+  // Docked beside a candidate window (remember: false): a candidate no dictionary has gets no
+  // "not found" page; an unpinned popup showing the previous candidate goes away instead.
+  if (options.remember === false && !result.results.length && pinButton.getAttribute('aria-pressed') !== 'true') {
+    if (options.show) await call('popup.hide').catch(() => {});
+    return;
+  }
   if (options.push !== false) {
     navigation.stack.splice(navigation.index + 1);
     if (navigation.stack[navigation.index] !== result.word) navigation.stack.push(result.word);
@@ -268,7 +277,9 @@ on('popup-lookup', (data) => {
     navigation.stack = [];
     navigation.index = -1;
   }
-  void lookup(String(data.word ?? ''), { show: true });
+  // Docked beside an input method's candidate window: every highlighted candidate comes through
+  // here, so these lookups stay out of the history.
+  void lookup(String(data.word ?? ''), { show: true, remember: data.docked !== true });
 });
 on('popup-hidden', () => {
   stopSpeaking();

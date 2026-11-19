@@ -6,6 +6,7 @@
 #include "dr/ripemd128.h"
 #include "dr/stardict.h"
 #include "dr/text.h"
+#include "../app/src/dock_placement.h"
 #include <cstdio>
 #include <iostream>
 #include <miniz.h>
@@ -397,6 +398,29 @@ int main()
     CHECK(truncate_text("苹果树", 2) == "苹果\xe2\x80\xa6");
     CHECK(truncate_text("abc", 3) == "abc");
     CHECK(truncate_text("ab cd", 3) == "ab\xe2\x80\xa6");
+    {
+        // The popup docked beside an input method's candidate window (app/src/dock_placement.h).
+        const RECT work{0, 0, 1920, 1040};
+        const SIZE size{540, 630};
+        // Room on the right: flush against the card's right edge, tops aligned.
+        POINT at = dock_position(RECT{400, 300, 700, 500}, size, work);
+        CHECK(at.x == 700 && at.y == 300);
+        // The card reaches the right side of the screen: flush against its left edge instead.
+        at = dock_position(RECT{1500, 300, 1900, 500}, size, work);
+        CHECK(at.x == 1500 - 540 && at.y == 300);
+        // Near the bottom: moved up to stay on the work area, still beside the card.
+        at = dock_position(RECT{400, 800, 700, 1000}, size, work);
+        CHECK(at.x == 700 && at.y == 1040 - 630);
+        // No room on either side (a card as wide as the screen): the roomier side, kept inside.
+        at = dock_position(RECT{300, 300, 1850, 500}, size, work);
+        CHECK(at.x == 0 && at.y == 300);
+        at = dock_position(RECT{100, 300, 1600, 500}, size, work);
+        CHECK(at.x == 1920 - 540);
+        // A work area that does not start at the origin (a second monitor on the left).
+        const RECT left{-1920, 0, 0, 1040};
+        at = dock_position(RECT{-300, -50, -10, 100}, size, left);
+        CHECK(at.x == -300 - 540 && at.y == 0);
+    }
     auto forms = english_base_forms("studies");
     CHECK(std::find(forms.begin(), forms.end(), "study") != forms.end());
     forms = english_base_forms("running");

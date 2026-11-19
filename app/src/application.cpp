@@ -401,10 +401,11 @@ std::string clipboard_text()
 } // namespace
 
 // Runs on a worker: the popup gets the word with the settings and dictionaries it renders with.
-void Application::send_popup_lookup(const std::string &word)
+void Application::send_popup_lookup(const std::string &word, bool docked)
 {
     Json event = {{"event", "popup-lookup"},
                   {"word", word},
+                  {"docked", docked},
                   {"settings", library_.settings()},
                   {"dictionaries", library_.list()},
                   {"favorites", library_.favorites()},
@@ -483,8 +484,48 @@ void Application::request_lookup(LookupRequest request)
         pending_lookup_ = std::move(request);
         return;
     }
+    const bool docked = request.anchor.dock.has_value();
+    if (docked)
+    {
+        dock_cancelled_ = false;
+        // Same word, the candidate window only moved or resized: move the popup, no new lookup.
+        if (popup_.docked() && request.word == docked_word_)
+        {
+            popup_anchor_ = request.anchor;
+            popup_.show_at(popup_anchor_);
+            return;
+        }
+        docked_word_ = request.word;
+    }
     popup_anchor_ = request.anchor;
-    queries_.enqueue([this, word = std::move(request.word)] { send_popup_lookup(word); });
+    queries_.enqueue([this, docked, word = std::move(request.word)] { send_popup_lookup(word, docked); });
+}
+
+std::optional<LookupRequest> parse_dock_payload(std::string_view text, bool &hide)
+{
+    hide = false;
+    auto request = Json::parse(text, nullptr, false);
+    if (!request.is_object())
+        return std::nullopt;
+    if (request.contains("hide") && request["hide"].is_boolean() && request["hide"].get<bool>())
+    {
+        hide = true;
+        return std::nullopt;
+    }
+    if (!request.contains("word") || !request["word"].is_string() || !request.contains("rect") ||
+        !request["rect"].is_array() || request["rect"].size() != 4 ||
+        !std::all_of(request["rect"].begin(), request["rect"].end(),
+                     [](const Json &value) { return value.is_number_integer(); }))
+        return std::nullopt;
+    const auto &r = request["rect"];
+    const RECT rect{r[0].get<LONG>(), r[1].get<LONG>(), r[2].get<LONG>(), r[3].get<LONG>()};
+    if (rect.left >= rect.right || rect.top >= rect.bottom)
+        return std::nullopt;
+    LookupRequest result{request["word"].get<std::string>()};
+    result.anchor.point = {rect.right, rect.top};
+    result.anchor.keyboard = true;
+    result.anchor.dock = rect;
+    return result;
 }
 
 void Application::copied_twice()
@@ -533,6 +574,22 @@ void Application::create_popup(HINSTANCE instance, const Json &settings)
     popup_.on_request = [this](std::string_view payload) {
         // {"word": "...", "x": …, "y": …, "caret": […], "keyboard": …} from another program (see popup.h).
         if (auto request = parse_lookup_payload(payload))
+            request_lookup(std::move(*request));
+    };
+    // An input method docks the popup beside its candidate window (see popup.h).
+    popup_.on_dock = [this](std::string_view payload) {
+        bool hide = false;
+        auto request = parse_dock_payload(payload, hide);
+        if (hide)
+        {
+            // Also drops a docked lookup still being rendered, so it does not show up afterwards.
+            dock_cancelled_ = true;
+            docked_word_.clear();
+            if (popup_.docked() && !popup_.pinned())
+                popup_.hide();
+            return;
+        }
+        if (request)
             request_lookup(std::move(*request));
     };
     // An input method asks for a short definition to show next to a candidate (see popup.h). The
@@ -833,7 +890,12 @@ void Application::receive(const Json &request, WebView &from)
         {
             Json result = true;
             if (method == "popup.show")
-                popup_.show_at(popup_anchor_); // the page has rendered the new lookup
+            {
+                // The page has rendered the new lookup. A docked one whose candidate window closed
+                // meanwhile stays hidden.
+                if (!(popup_anchor_.dock && dock_cancelled_))
+                    popup_.show_at(popup_anchor_);
+            }
             else if (method == "popup.hide")
                 popup_.hide();
             else if (method == "popup.pin")
