@@ -1,4 +1,5 @@
 #include "popup.h"
+#include "dock_placement.h"
 #include <algorithm>
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -102,7 +103,18 @@ void Popup::set_colors(UINT32 background, bool dark)
 
 void Popup::show_at(const PopupAnchor &anchor)
 {
+    if (anchor.dock)
+    {
+        show_docked(*anchor.dock);
+        return;
+    }
     const bool shown = visible();
+    // Summoned again after being docked: an ordinary popup that may be activated.
+    if (docked_)
+    {
+        docked_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE);
+    }
     if (!shown || !pinned_)
     {
         const POINT cursor = anchor.point;
@@ -166,6 +178,44 @@ void Popup::show_at(const PopupAnchor &anchor)
         SetTimer(hwnd_, track_timer, track_interval_ms, nullptr);
     else
         KillTimer(hwnd_, track_timer);
+}
+
+void Popup::show_docked(const RECT &anchor)
+{
+    const bool shown = visible();
+    if (shown && !docked_)
+    {
+        // A popup the user summoned is on screen (Ctrl+C+C, a lookup hotkey): leave it alone.
+        return;
+    }
+    // The user is typing in another program: never take the foreground or focus, not even by a
+    // click on the popup (WS_EX_NOACTIVATE and WM_MOUSEACTIVATE below).
+    docked_ = true;
+    keyboard_ = true;
+    KillTimer(hwnd_, track_timer);
+    SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
+    if (!shown || !pinned_)
+    {
+        HMONITOR monitor = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{sizeof(info)};
+        GetMonitorInfoW(monitor, &info);
+        const RECT work = info.rcWork;
+        UINT dpi_x = 96, dpi_y = 96;
+        GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+        const SIZE size{std::min<LONG>(MulDiv(width_, dpi_x, 96), work.right - work.left),
+                        std::min<LONG>(MulDiv(height_, dpi_x, 96), work.bottom - work.top)};
+        const POINT at = dock_position(anchor, size, work);
+        SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, at.x, at.y, size.cx, size.cy,
+                     SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    }
+    else
+        SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    shown_at_ = GetTickCount64();
+    if (!shown && on_shown)
+        on_shown();
+    if (on_moved)
+        on_moved();
 }
 
 void Popup::hide()
@@ -330,6 +380,12 @@ LRESULT Popup::handle(UINT message, WPARAM w, LPARAM l)
                      suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
     }
+    case WM_MOUSEACTIVATE:
+        // Docked beside a candidate window: clicks (pin, scroll, links) must not take focus from
+        // the program the user is typing in, which would end the composition.
+        if (docked_)
+            return MA_NOACTIVATE;
+        break;
     case WM_ACTIVATE:
         // Another window was activated (a click elsewhere): an unpinned popup goes away.
         // Activation can still settle for a moment after show_near takes the foreground.
@@ -379,6 +435,8 @@ LRESULT Popup::handle(UINT message, WPARAM w, LPARAM l)
             on_open(payload);
         else if (data->dwData == brief_request && on_brief && payload.size() <= 4 * 1024)
             on_brief(payload);
+        else if (data->dwData == dock_request && on_dock && payload.size() <= 4 * 1024)
+            on_dock(payload);
         else
             return FALSE;
         return TRUE;
